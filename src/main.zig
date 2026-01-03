@@ -1,10 +1,12 @@
 const std = @import("std");
-const zor_lang = @import("zor_lang");
+const chunk_mod = @import("chunk.zig");
+const Chunk = chunk_mod.Chunk;
+const OpCode = chunk_mod.OpCode;
 
 pub fn main() !void {
-    std.debug.print("Hello World");
+    std.debug.print("Hello World\n", .{});
 
-    const gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     defer {
 
@@ -17,6 +19,8 @@ pub fn main() !void {
 
     const allocator = gpa.allocator();
 
-    // TODO: actually use the allocator
-    _ = allocator;
+    // Sample chunk code.
+    var c = Chunk.init();
+    defer c.deinit(allocator);
+    try c.write(allocator, @intFromEnum(OpCode.opreturn));
 }
