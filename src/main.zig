@@ -22,5 +22,7 @@ pub fn main() !void {
     // Sample chunk code.
     var c = Chunk.init();
     defer c.deinit(allocator);
-    try c.write(allocator, @intFromEnum(OpCode.opreturn));
+    try c.write(allocator, .opreturn);
+
+    c.disassemble("test chunk");
 }
