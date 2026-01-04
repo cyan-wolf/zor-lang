@@ -1,35 +1,48 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+pub const CodeContent = u8;
+pub const Value = f64;
+
 pub const OpCode = enum(u8) {
     opreturn,
+    constant,
 
-    pub fn asString(self: OpCode) []const u8 {
+    pub fn size(self: OpCode) usize {
         return switch (self) {
-            .opreturn => "OP_RETURN",
+            .opreturn => 1,
+            .constant => 2,
         };
     }
 };
 
-pub const ChunkPayload = OpCode;
-
-const ChunkList = std.ArrayList(ChunkPayload);
+const CodeList = std.ArrayList(CodeContent);
+const ValueList = std.ArrayList(Value);
 
 pub const Chunk = struct {
-    code: ChunkList,
+    code: CodeList,
+    constants: ValueList,
 
     pub fn init() Chunk {
         return .{
             .code = .empty,
+            .constants = .empty,
         };
     }
 
-    pub fn write(self: *Chunk, allocator: Allocator, byte: ChunkPayload) !void {
+    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent) !void {
         try self.code.append(allocator, byte);
+    }
+
+    // Adds a constant to the chunk and returns the index where it was inserted.
+    pub fn addConstant(self: *Chunk, allocator: Allocator, value: Value) !usize {
+        try self.constants.append(allocator, value);
+        return self.constants.items.len - 1;
     }
 
     pub fn deinit(self: *Chunk, allocator: Allocator) void {
         self.code.deinit(allocator);
+        self.constants.deinit(allocator);
     }
 
     pub fn disassemble(self: *const Chunk, name: []const u8) void {
@@ -47,10 +60,25 @@ pub const Chunk = struct {
     fn disassembleInstruction(self: *const Chunk, offset: usize) usize {
         std.debug.print("{d:0>4} ", .{offset});
 
-        const instruction = self.code.items[offset];
-        std.debug.print("{s}\n", .{instruction.asString()});
+        // NOTE: we assume that `offset` points to a byte that corresponds to 
+        // an op code.
+        const instruction: OpCode = @enumFromInt(self.code.items[offset]);
 
-        // All current instructions are one byte long.
-        return offset + 1;
+        switch (instruction) {
+            .opreturn => std.debug.print("OP_RETURN\n", .{}),
+            .constant => {
+                const constIdx: usize = @intCast(self.code.items[offset + 1]);
+                std.debug.print("OP_CONSTANT {d:4} '", .{constIdx});
+
+                const value = self.constants.items[constIdx];
+
+                // Print the value.
+                std.debug.print("{d}", .{value});
+
+                std.debug.print("'\n", .{});
+            },
+        }
+
+        return offset + instruction.size();
     }
 };

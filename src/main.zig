@@ -22,7 +22,12 @@ pub fn main() !void {
     // Sample chunk code.
     var c = Chunk.init();
     defer c.deinit(allocator);
-    try c.write(allocator, .opreturn);
+
+    const constIdx = try c.addConstant(allocator, 1.2);
+    try c.write(allocator, @intFromEnum(OpCode.constant));
+    try c.write(allocator, @intCast(constIdx));
+
+    try c.write(allocator, @intFromEnum(OpCode.opreturn));
 
     c.disassemble("test chunk");
 }
