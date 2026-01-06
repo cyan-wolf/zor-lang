@@ -38,6 +38,10 @@ pub const Chunk = struct {
         try self.lines.append(allocator, line);
     }
 
+    pub fn getContent(self: *Chunk, offset: usize) CodeContent {
+        return self.code[offset];
+    }
+
     // Adds a constant to the chunk and returns the index where it was inserted.
     pub fn addConstant(self: *Chunk, allocator: Allocator, value: Value) !usize {
         try self.constants.append(allocator, value);

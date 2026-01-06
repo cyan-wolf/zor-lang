@@ -2,6 +2,7 @@ const std = @import("std");
 const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const OpCode = chunk_mod.OpCode;
+const VM = @import("vm.zig").VM;
 
 pub fn main() !void {
     std.debug.print("Hello World\n", .{});
@@ -9,7 +10,6 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     defer {
-
         // Deinit the allocator and check for memory leaks.
         const check = gpa.deinit();
         if (check == .leak) {
@@ -18,6 +18,9 @@ pub fn main() !void {
     }
 
     const allocator = gpa.allocator();
+
+    var vm = VM.init();
+    defer vm.deinit();
 
     // Sample chunk code.
     var c = Chunk.init();
