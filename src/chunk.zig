@@ -17,21 +17,25 @@ pub const OpCode = enum(u8) {
 };
 
 const CodeList = std.ArrayList(CodeContent);
+const LineList = std.ArrayList(u32);
 const ValueList = std.ArrayList(Value);
 
 pub const Chunk = struct {
     code: CodeList,
+    lines: LineList,
     constants: ValueList,
 
     pub fn init() Chunk {
         return .{
             .code = .empty,
+            .lines = .empty,
             .constants = .empty,
         };
     }
 
-    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent) !void {
+    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent, line: u32) !void {
         try self.code.append(allocator, byte);
+        try self.lines.append(allocator, line);
     }
 
     // Adds a constant to the chunk and returns the index where it was inserted.
@@ -42,6 +46,7 @@ pub const Chunk = struct {
 
     pub fn deinit(self: *Chunk, allocator: Allocator) void {
         self.code.deinit(allocator);
+        self.lines.deinit(allocator);
         self.constants.deinit(allocator);
     }
 
@@ -51,7 +56,7 @@ pub const Chunk = struct {
 
         var offset: usize = 0;
         while (offset < self.code.items.len) {
-            // Re-assign the offset depending on how the instruction was 
+            // Re-assign the offset depending on how the instruction was
             // processed since different instructions can have different sizes.
             offset = self.disassembleInstruction(offset);
         }
@@ -60,7 +65,15 @@ pub const Chunk = struct {
     fn disassembleInstruction(self: *const Chunk, offset: usize) usize {
         std.debug.print("{d:0>4} ", .{offset});
 
-        // NOTE: we assume that `offset` points to a byte that corresponds to 
+        // Print the instruction's line number or a | if the previous
+        // instruction had the same line number.
+        if (offset > 0 and self.lines.items[offset] == self.lines.items[offset - 1]) {
+            std.debug.print("   | ", .{});
+        } else {
+            std.debug.print("{d:4} ", .{self.lines.items[offset]});
+        }
+
+        // NOTE: we assume that `offset` points to a byte that corresponds to
         // an op code.
         const instruction: OpCode = @enumFromInt(self.code.items[offset]);
 

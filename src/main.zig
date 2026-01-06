@@ -24,10 +24,10 @@ pub fn main() !void {
     defer c.deinit(allocator);
 
     const constIdx = try c.addConstant(allocator, 1.2);
-    try c.write(allocator, @intFromEnum(OpCode.constant));
-    try c.write(allocator, @intCast(constIdx));
+    try c.write(allocator, @intFromEnum(OpCode.constant), 12);
+    try c.write(allocator, @intCast(constIdx), 12);
 
-    try c.write(allocator, @intFromEnum(OpCode.opreturn));
+    try c.write(allocator, @intFromEnum(OpCode.opreturn), 12);
 
     c.disassemble("test chunk");
 }
