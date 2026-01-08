@@ -33,4 +33,6 @@ pub fn main() !void {
     try c.write(allocator, @intFromEnum(OpCode.opreturn), 12);
 
     c.disassemble("test chunk");
+
+    try vm.interpret(&c);
 }
