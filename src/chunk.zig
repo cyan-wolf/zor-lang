@@ -66,7 +66,7 @@ pub const Chunk = struct {
         }
     }
 
-    fn disassembleInstruction(self: *const Chunk, offset: usize) usize {
+    pub fn disassembleInstruction(self: *const Chunk, offset: usize) usize {
         std.debug.print("{d:0>4} ", .{offset});
 
         // Print the instruction's line number or a | if the previous

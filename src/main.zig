@@ -19,7 +19,7 @@ pub fn main() !void {
 
     const allocator = gpa.allocator();
 
-    var vm = VM.init();
+    var vm = VM.init(allocator);
     defer vm.deinit();
 
     // Sample chunk code.
