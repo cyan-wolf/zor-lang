@@ -67,6 +67,18 @@ pub const VM = struct {
         return self.chunk.?.constants.items[constantIdx];
     }
 
+    inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div }) !void {
+        const b = self.pop();
+        const a = self.pop();
+        
+        try self.push(switch (op) {
+            .add => a + b,
+            .sub => a - b,
+            .mul => a * b,
+            .div => a / b,
+        });
+    }
+
     fn run(self: *VM) !void {
         while (true) {
             if (DEBUG_TRACE_EXECUTION) {
@@ -100,6 +112,10 @@ pub const VM = struct {
                 .negate => {
                     try self.push(-self.pop());
                 },
+                .add => try self.binaryOp(.add),
+                .subtract => try self.binaryOp(.sub),
+                .multiply => try self.binaryOp(.mul),
+                .divide => try self.binaryOp(.div),
             }
         }
     }

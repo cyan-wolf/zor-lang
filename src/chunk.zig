@@ -8,12 +8,20 @@ pub const OpCode = enum(u8) {
     opreturn,
     constant,
     negate,
+    add,
+    subtract,
+    multiply,
+    divide,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
             .opreturn => 1,
             .constant => 2,
             .negate => 2,
+            .add => 1,
+            .subtract => 1,
+            .multiply => 1,
+            .divide => 1,
         };
     }
 };
@@ -97,6 +105,10 @@ pub const Chunk = struct {
                 std.debug.print("'\n", .{});
             },
             .negate => std.debug.print("OP_NEGATE", .{}),
+            .add => std.debug.print("OP_ADD", .{}),
+            .subtract => std.debug.print("OP_SUBTRACT", .{}),
+            .multiply => std.debug.print("OP_MULTIPLY", .{}),
+            .divide => std.debug.print("OP_DIVIDE", .{}),
         }
 
         return offset + instruction.size();
