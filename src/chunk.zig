@@ -7,11 +7,13 @@ pub const Value = f64;
 pub const OpCode = enum(u8) {
     opreturn,
     constant,
+    negate,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
             .opreturn => 1,
             .constant => 2,
+            .negate => 2,
         };
     }
 };
@@ -94,6 +96,7 @@ pub const Chunk = struct {
 
                 std.debug.print("'\n", .{});
             },
+            .negate => std.debug.print("OP_NEGATE", .{}),
         }
 
         return offset + instruction.size();

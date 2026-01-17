@@ -96,7 +96,9 @@ pub const VM = struct {
                 .constant => {
                     const constant = self.readConstant();
                     try self.push(constant);
-                    break;
+                },
+                .negate => {
+                    try self.push(-self.pop());
                 },
             }
         }
