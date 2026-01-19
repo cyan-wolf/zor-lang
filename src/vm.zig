@@ -6,6 +6,8 @@ const CodeContent = chunk_mod.CodeContent;
 const OpCode = chunk_mod.OpCode;
 const Value = chunk_mod.Value;
 
+const Cli = @import("cli.zig").Cli;
+
 fn printValue(value: Value) void {
     std.debug.print("{d}", .{value});
 }
@@ -20,15 +22,17 @@ pub const InterpretError = error {
 pub const VM = struct {
     chunk: ?*Chunk,
     ip: usize,
-    allocator: Allocator,
     stack: std.ArrayList(Value),
+    allocator: Allocator,
+    cli: Cli,
 
-    pub fn init(allocator: Allocator) VM {
+    pub fn init(allocator: Allocator, cli: Cli) VM {
         return .{
             .chunk = null,
             .ip = 0,
-            .allocator = allocator,
             .stack = .empty,
+            .allocator = allocator,
+            .cli = cli,
         };
     }
 
@@ -118,6 +122,20 @@ pub const VM = struct {
                 .divide => try self.binaryOp(.div),
             }
         }
+    }
+
+    pub fn repl(self: *VM) !void {
+
+        while (true) {
+            const line = try self.cli.input("> ");
+
+            std.debug.print("This line was typed: {s}\n", .{line});
+        }
+    }
+
+    pub fn runFile(self: *VM, filename: []const u8) !void {
+        _ = self;
+        _ = filename;
     }
 
     pub fn deinit(self: *VM) void {
