@@ -7,6 +7,7 @@ const OpCode = chunk_mod.OpCode;
 const Value = chunk_mod.Value;
 
 const Cli = @import("cli.zig").Cli;
+const Compiler = @import("compiler.zig").Compiler;
 
 fn printValue(value: Value) void {
     std.debug.print("{d}", .{value});
@@ -23,22 +24,29 @@ pub const VM = struct {
     chunk: ?*Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
+
     allocator: Allocator,
     cli: Cli,
+    compiler: ?Compiler,
 
     pub fn init(allocator: Allocator, cli: Cli) VM {
         return .{
             .chunk = null,
             .ip = 0,
             .stack = .empty,
+
             .allocator = allocator,
             .cli = cli,
+            .compiler = null,
         };
     }
 
     pub fn interpret(self: *VM, source: []const u8) !void {
-        _ = self;
-        _ = source;
+        // NOTE: This might not have to be a field of VM.
+        self.compiler = Compiler.init(source);
+
+        // The '?' is only to satisfy the compiler.
+        try self.compiler.?.compile();
     }
 
     fn peek(self: *const VM) Value {
