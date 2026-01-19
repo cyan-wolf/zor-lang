@@ -36,11 +36,9 @@ pub const VM = struct {
         };
     }
 
-    pub fn interpret(self: *VM, chunk: *Chunk) !void {
-        self.chunk = chunk;
-        self.ip = 0;
-
-        try self.run();
+    pub fn interpret(self: *VM, source: []const u8) !void {
+        _ = self;
+        _ = source;
     }
 
     fn peek(self: *const VM) Value {
@@ -125,17 +123,22 @@ pub const VM = struct {
     }
 
     pub fn repl(self: *VM) !void {
-
         while (true) {
             const line = try self.cli.input("> ");
-
-            std.debug.print("This line was typed: {s}\n", .{line});
+            try self.interpret(line);
         }
     }
 
     pub fn runFile(self: *VM, filename: []const u8) !void {
-        _ = self;
-        _ = filename;
+        const OOM_SAFETY_LIMIT = 10 * 1024 * 1024;
+
+        const content = try std.fs.cwd().readFileAlloc(self.allocator, filename, OOM_SAFETY_LIMIT);
+        defer self.allocator.free(content);
+
+        self.interpret(content) catch |err| switch (err) {
+            error.CompileError => std.process.exit(65),
+            error.RuntimeError => std.process.exit(70),
+        };
     }
 
     pub fn deinit(self: *VM) void {
