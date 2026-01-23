@@ -16,6 +16,16 @@ pub const Scanner = struct {
         };
     }
 
+    fn isDigit(c: u8) bool {
+        return '0' <= c and c <= '9';
+    }
+
+    fn isAlpha(c: u8) bool {
+        return ('a' <= c and c <= 'z') or 
+            ('A' <= c and c <= 'Z') or 
+            c == '_';
+    }
+
     pub fn scanToken(self: *Scanner) Token {
         self.start = self.current;
 
@@ -24,6 +34,13 @@ pub const Scanner = struct {
         }
 
         const c = self.advance();
+
+        if (isAlpha(c)) {
+            return self.scanIdentifier();
+        }
+        if (isDigit(c)) {
+            return self.scanNumberLiteral();
+        }
 
         return switch (c) {
             '(' => self.makeToken(.left_paren),
@@ -41,6 +58,7 @@ pub const Scanner = struct {
             '=' => self.makeToken(if (self.match('=')) .double_equal else .equal),
             '<' => self.makeToken(if (self.match('=')) .less_equal else .less),
             '>' => self.makeToken(if (self.match('=')) .greater_equal else .greater),
+            '"' => self.scanStringLiteral(),
         };
     }
 
@@ -70,6 +88,51 @@ pub const Scanner = struct {
                 break;
             }
         }
+    }
+
+    fn scanStringLiteral(self: *Scanner) Token {
+        while (self.peek() != '"' and !self.isAtEnd()) {
+            if (self.peek() == '\n') {
+                self.line += 1;
+            }
+            self.advance();
+        }
+
+        if (self.isAtEnd()) {
+            return self.makeErrToken("Unterminated string literal.");
+        }
+
+        // Consume the closing quote.
+        self.advance();
+        
+        return self.makeToken(.string);
+    }
+
+    fn scanNumberLiteral(self: *Scanner) Token {
+        while (isDigit(self.peek())) {
+            self.advance();
+        }
+
+        if (self.peek() == '.' and isDigit(self.peekNext())) {
+            self.advance();
+
+            while (isDigit(self.peek())) {
+                self.advance();
+            }
+        }
+        return self.makeToken(.number);
+    }
+
+    fn scanIdentifier(self: *Scanner) Token {
+        while (isAlpha(self.peek()) or isDigit(self.peek())) {
+            self.advance();
+        }
+        return self.makeToken(self.determineIdentifierKind());
+    }
+
+    fn determineIdentifierKind(self: *Scanner) TokenKind {
+        _ = self;
+        return .identifier;
     }
 
     fn makeToken(self: *Scanner, kind: TokenKind) Token {
