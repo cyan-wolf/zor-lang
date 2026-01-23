@@ -57,8 +57,7 @@ pub const TokenKind = enum {
 
 pub const Token = struct {
     kind: TokenKind,
-    start_idx: usize,
-    len: usize,
+    text_ref: []const u8,
     line: usize,
 };
 
