@@ -34,7 +34,8 @@ pub const Scanner = struct {
             return self.makeToken(.eof);
         }
 
-        const c = self.advance();
+        const c = self.source[self.current];
+        self.advance();
 
         if (isAlpha(c)) {
             return self.scanIdentifier();
@@ -60,6 +61,7 @@ pub const Scanner = struct {
             '<' => self.makeToken(if (self.match('=')) .less_equal else .less),
             '>' => self.makeToken(if (self.match('=')) .greater_equal else .greater),
             '"' => self.scanStringLiteral(),
+            else => @panic("unknown character"),
         };
     }
 
@@ -145,19 +147,19 @@ pub const Scanner = struct {
             'v' => self.checkKeywordInSource(1, "ar", .k_var),
             'w' => self.checkKeywordInSource(1, "hile", .k_while),
             'f' => if (self.current - self.start > 1) {
-                switch (self.source[self.start + 1]) {
+                return switch (self.source[self.start + 1]) {
                     'a' => self.checkKeywordInSource(2, "lse", .k_false),
                     'o' => self.checkKeywordInSource(2, "r", .k_for),
                     'u' => self.checkKeywordInSource(2, "n", .k_fun),
                     else => .identifier,
-                }
+                };
             } else .identifier,
             't' => if (self.current - self.start > 1) {
-                switch (self.source[self.start + 1]) {
+                return switch (self.source[self.start + 1]) {
                     'h' => self.checkKeywordInSource(2, "is", .k_this),
                     'r' => self.checkKeywordInSource(2, "ue", .k_true),
                     else => .identifier, 
-                }
+                };
             } else .identifier,
             else => .identifier,
         };
@@ -186,9 +188,8 @@ pub const Scanner = struct {
         };
     }
 
-    fn advance(self: *Scanner) u8 {
+    fn advance(self: *Scanner) void {
         self.current += 1;
-        return self.source[self.current - 1];
     }
 
     fn peek(self: *const Scanner) u8 {

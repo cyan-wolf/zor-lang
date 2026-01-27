@@ -27,7 +27,7 @@ pub const OpCode = enum(u8) {
 };
 
 const CodeList = std.ArrayList(CodeContent);
-const LineList = std.ArrayList(u32);
+const LineList = std.ArrayList(usize);
 const ValueList = std.ArrayList(Value);
 
 pub const Chunk = struct {
@@ -43,7 +43,7 @@ pub const Chunk = struct {
         };
     }
 
-    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent, line: u32) !void {
+    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent, line: usize) !void {
         try self.code.append(allocator, byte);
         try self.lines.append(allocator, line);
     }
