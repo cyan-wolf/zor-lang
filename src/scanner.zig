@@ -1,3 +1,4 @@
+const std = @import("std");
 const Token = @import("token.zig").Token;
 const TokenKind = @import("token.zig").TokenKind;
 
@@ -21,8 +22,8 @@ pub const Scanner = struct {
     }
 
     fn isAlpha(c: u8) bool {
-        return ('a' <= c and c <= 'z') or 
-            ('A' <= c and c <= 'Z') or 
+        return ('a' <= c and c <= 'z') or
+            ('A' <= c and c <= 'Z') or
             c == '_';
     }
 
@@ -104,7 +105,7 @@ pub const Scanner = struct {
 
         // Consume the closing quote.
         self.advance();
-        
+
         return self.makeToken(.string);
     }
 
@@ -131,7 +132,41 @@ pub const Scanner = struct {
     }
 
     fn determineIdentifierKind(self: *Scanner) TokenKind {
-        _ = self;
+        return switch (self.source[self.start]) {
+            'a' => self.checkKeywordInSource(1, "nd", .k_and),
+            'c' => self.checkKeywordInSource(1, "lass", .k_class),
+            'e' => self.checkKeywordInSource(1, "lse", .k_else),
+            'i' => self.checkKeywordInSource(1, "f", .k_if),
+            'n' => self.checkKeywordInSource(1, "il", .k_nil),
+            'o' => self.checkKeywordInSource(1, "r", .k_or),
+            'p' => self.checkKeywordInSource(1, "rint", .k_print),
+            'r' => self.checkKeywordInSource(1, "eturn", .k_return),
+            's' => self.checkKeywordInSource(1, "uper", .k_super),
+            'v' => self.checkKeywordInSource(1, "ar", .k_var),
+            'w' => self.checkKeywordInSource(1, "hile", .k_while),
+            'f' => if (self.current - self.start > 1) {
+                switch (self.source[self.start + 1]) {
+                    'a' => self.checkKeywordInSource(2, "lse", .k_false),
+                    'o' => self.checkKeywordInSource(2, "r", .k_for),
+                    'u' => self.checkKeywordInSource(2, "n", .k_fun),
+                    else => .identifier,
+                }
+            } else .identifier,
+            't' => if (self.current - self.start > 1) {
+                switch (self.source[self.start + 1]) {
+                    'h' => self.checkKeywordInSource(2, "is", .k_this),
+                    'r' => self.checkKeywordInSource(2, "ue", .k_true),
+                    else => .identifier, 
+                }
+            } else .identifier,
+            else => .identifier,
+        };
+    }
+
+    fn checkKeywordInSource(self: *const Scanner, start: usize, rest: []const u8, keywordKind: TokenKind) TokenKind {
+        if ((self.current - self.start == start + rest.len) and (std.mem.eql(u8, self.source[self.start + start..rest.len+1], rest))) {
+            return keywordKind;
+        }
         return .identifier;
     }
 
