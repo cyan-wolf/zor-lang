@@ -51,6 +51,7 @@ pub const TokenKind = enum {
     k_while,
 
     // Misc.
+    none,
     error_token,
     eof,
 };
@@ -59,5 +60,13 @@ pub const Token = struct {
     kind: TokenKind,
     text_ref: []const u8,
     line: usize,
+
+    pub fn createDummyInitialToken() Token {
+        return .{
+            .kind = .none,
+            .text_ref = "",
+            .line = 0,
+        };
+    }
 };
 

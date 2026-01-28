@@ -16,8 +16,8 @@ pub const Parser = struct {
 
     pub fn init() Parser {
         return .{
-            .current = .eof,
-            .previous = .eof,
+            .current = Token.createDummyInitialToken(),
+            .previous = Token.createDummyInitialToken(),
             .had_error = false,
             .in_panic_mode = false,
         };
