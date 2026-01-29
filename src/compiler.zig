@@ -4,9 +4,11 @@ const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const OpCode = chunk_mod.OpCode;
 const CodeContent = chunk_mod.CodeContent;
+const Value = chunk_mod.Value;
 const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
+const Precendence = @import("precedence.zig").Precendence;
 
 pub const Parser = struct {
     current: Token,
@@ -106,19 +108,70 @@ pub const Compiler = struct {
         self.markErrorAtCurrent(message);
     }
 
-    fn expression(self: *Compiler) void {
-        _ = self;
+    fn expression(self: *Compiler) !void {
+        try self.parseWithPrecendece(.assignment);
     }
 
     fn emitByte(self: *Compiler, byte: CodeContent) !void {
         try self.currentChunk().write(self.allocator, byte, self.parser.previous.line);
+    }
+    
+    fn emitCode(self: *Compiler, code: OpCode) !void {
+        try self.emitByte(@intFromEnum(code));
+    }
+
+    fn emitCodeAndOperand(self: *Compiler, code: OpCode, operand: CodeContent) !void {
+        try self.emitCode(code);
+        try self.emitByte(operand);
     }
 
     fn end(self: *Compiler) !void {
         try self.emitReturn();   
     }
 
+    fn number(self: *Compiler) !void {
+        const value: Value = try std.fmt.parseFloat(Value, self.parser.previous.text_ref);
+        self.emitConstant(value);
+    }
+
+    fn unary(self: *Compiler) !void {
+        const prev_kind = self.parser.previous.kind;
+
+        // Compile the operand of the unary expression.
+        try self.parseWithPrecendece(.unary);
+
+        switch (prev_kind) {
+            .minus => self.emitCode(.negate),
+            else => unreachable,
+        }
+    }
+
+    fn parseWithPrecendece(self: *Compiler, precendence: Precendence) !void {
+        _ = self;
+        _ = precendence;
+    }
+
+    fn grouping(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.right_paren, "Expect ')' after expression.");
+
+    }
+
     fn emitReturn(self: *Compiler) !void {
-        try self.emitByte(@intFromEnum(OpCode.opreturn));
+        try self.emitCode(.opreturn);
+    }
+
+    fn emitConstant(self: *Compiler, value: Value) !void {
+        self.emitCodeAndOperand(.constant, self.makeConstant(value));
+    }
+
+    fn makeConstant(self: *Compiler, value: Value) !CodeContent {
+        const constIdx = try self.currentChunk().addConstant(self.allocator, value);
+        
+        if (constIdx > std.math.maxInt(CodeContent)) {
+            self.markError("Too many constants in one chunk.");
+            return 0;
+        }
+        return @intCast(constIdx);
     }
 };
