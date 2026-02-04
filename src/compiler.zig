@@ -8,7 +8,9 @@ const Value = chunk_mod.Value;
 const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
-const Precendence = @import("precedence.zig").Precendence;
+const precedence_mod = @import("precedence.zig");
+const Precendence = precedence_mod.Precendence;
+const ParseRule = precedence_mod.ParseRule;
 
 pub const Parser = struct {
     current: Token,
@@ -34,6 +36,8 @@ pub const Compiler = struct {
 
     allocator: std.mem.Allocator,
 
+    rules: std.enums.EnumArray(TokenKind, ParseRule),
+
     pub fn init(source: []const u8, alloctor: std.mem.Allocator) Compiler {
         return .{
             .source = source,
@@ -42,6 +46,18 @@ pub const Compiler = struct {
             .complingChunk = undefined,
 
             .allocator = alloctor,
+
+            .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
+                .left_paren = .{.prefix = Compiler.grouping, .infix = null, .precedence = .none },
+                .right_paren = .{.prefix = null, .infix = null, .precedence = .none},
+                .left_brace = .{.prefix = null, .infix = null, .precedence = .none },
+                .right_brace = .{.prefix = null, .infix = null, .precedence = .none },
+                .comma = .{.prefix = null, .infix = null, .precedence = .none},
+                .dot = .{.prefix = null, .infix = null, .precedence = .none},
+                .minus = .{.prefix = Compiler.unary, .infix = Compiler.binary, .precedence = .term},
+
+                // TODO...
+            }),
         };
     }
 
@@ -141,9 +157,13 @@ pub const Compiler = struct {
         try self.parseWithPrecendece(.unary);
 
         switch (prev_kind) {
-            .minus => self.emitCode(.negate),
+            .minus => try self.emitCode(.negate),
             else => unreachable,
         }
+    }
+
+    fn binary(self: *Compiler) !void {
+        _ = self;
     }
 
     fn parseWithPrecendece(self: *Compiler, precendence: Precendence) !void {

@@ -1,3 +1,4 @@
+const Compiler = @import("compiler.zig").Compiler;
 
 pub const Precendence = enum {
     none,
@@ -8,7 +9,19 @@ pub const Precendence = enum {
     comparison, // < > <= >=
     term, // + -
     factor, // * /
-    unary, // ! - 
+    unary, // ! -
     call, // . ()
     primary,
+};
+
+const ParseFnError = error{
+    OutOfMemory,
+};
+
+pub const ParseFn = *const fn (*Compiler) ParseFnError!void;
+
+pub const ParseRule = struct {
+    prefix: ?ParseFn,
+    infix: ?ParseFn,
+    precedence: Precendence,
 };
