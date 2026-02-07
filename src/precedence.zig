@@ -16,6 +16,7 @@ pub const Precendence = enum {
 
 const ParseFnError = error{
     OutOfMemory,
+    InvalidCharacter,
 };
 
 pub const ParseFn = *const fn (*Compiler) ParseFnError!void;
