@@ -50,47 +50,47 @@ pub const Compiler = struct {
             .allocator = alloctor,
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
-                .left_paren = .{.prefix = Compiler.grouping, .infix = null, .precedence = .none },
-                .right_paren = .{.prefix = null, .infix = null, .precedence = .none},
-                .left_brace = .{.prefix = null, .infix = null, .precedence = .none },
-                .right_brace = .{.prefix = null, .infix = null, .precedence = .none },
-                .comma = .{.prefix = null, .infix = null, .precedence = .none},
-                .dot = .{.prefix = null, .infix = null, .precedence = .none},
-                .minus = .{.prefix = Compiler.unary, .infix = Compiler.binary, .precedence = .term},
-                .plus = .{.prefix = null, .infix = Compiler.binary, .precedence = .term},
-                .semicolon = .{.prefix = null, .infix = null, .precedence = .none},
-                .slash = .{.prefix = null, .infix = null, .precedence = .factor},
-                .star = .{.prefix = null, .infix = Compiler.binary, .precedence = .factor},
-                .bang = .{.prefix = null, .infix = null, .precedence = .none},
-                .bang_equal = .{.prefix = null, .infix = null, .precedence = .none},
-                .equal = .{.prefix = null, .infix = null, .precedence = .none},
-                .double_equal = .{.prefix = null, .infix = null, .precedence = .none},
-                .greater = .{.prefix = null, .infix = null, .precedence = .none},
-                .greater_equal = .{.prefix = null, .infix = null, .precedence = .none},
-                .less = .{.prefix = null, .infix = null, .precedence = .none},
-                .less_equal = .{.prefix = null, .infix = null, .precedence = .none},
-                .identifier = .{.prefix = null, .infix = null, .precedence = .none},
-                .string = .{.prefix = null, .infix = null, .precedence = .none},
-                .number = .{.prefix = Compiler.number, .infix = null, .precedence = .none},
-                .k_and = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_or = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_class = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_else = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_false = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_for = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_fun = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_if = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_nil = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_print = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_return = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_super = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_this = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_true = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_var = .{.prefix = null, .infix = null, .precedence = .none},
-                .k_while = .{.prefix = null, .infix = null, .precedence = .none},
-                .error_token = .{.prefix = null, .infix = null, .precedence = .none},
-                .eof = .{.prefix = null, .infix = null, .precedence = .none},
-                .none = .{.prefix = null, .infix = null, .precedence = .none},
+                .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
+                .right_paren = .{ .prefix = null, .infix = null, .precedence = .none },
+                .left_brace = .{ .prefix = null, .infix = null, .precedence = .none },
+                .right_brace = .{ .prefix = null, .infix = null, .precedence = .none },
+                .comma = .{ .prefix = null, .infix = null, .precedence = .none },
+                .dot = .{ .prefix = null, .infix = null, .precedence = .none },
+                .minus = .{ .prefix = Compiler.unary, .infix = Compiler.binary, .precedence = .term },
+                .plus = .{ .prefix = null, .infix = Compiler.binary, .precedence = .term },
+                .semicolon = .{ .prefix = null, .infix = null, .precedence = .none },
+                .slash = .{ .prefix = null, .infix = Compiler.binary, .precedence = .factor },
+                .star = .{ .prefix = null, .infix = Compiler.binary, .precedence = .factor },
+                .bang = .{ .prefix = null, .infix = null, .precedence = .none },
+                .bang_equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .double_equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .greater = .{ .prefix = null, .infix = null, .precedence = .none },
+                .greater_equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .less = .{ .prefix = null, .infix = null, .precedence = .none },
+                .less_equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .identifier = .{ .prefix = null, .infix = null, .precedence = .none },
+                .string = .{ .prefix = null, .infix = null, .precedence = .none },
+                .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
+                .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_class = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_else = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_false = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_for = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_fun = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_if = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_nil = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_print = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_return = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_super = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_this = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_true = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_var = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_while = .{ .prefix = null, .infix = null, .precedence = .none },
+                .error_token = .{ .prefix = null, .infix = null, .precedence = .none },
+                .eof = .{ .prefix = null, .infix = null, .precedence = .none },
+                .none = .{ .prefix = null, .infix = null, .precedence = .none },
             }),
         };
     }
@@ -99,13 +99,16 @@ pub const Compiler = struct {
         self.complingChunk = chunk;
 
         self.advance();
+        try self.expression();
         self.consume(.eof, "End of expression.");
 
-        try self.end();        
+        try self.end();
         return !self.parser.had_error;
     }
 
     fn advance(self: *Compiler) void {
+        std.debug.print("Moving from {s} to {s}\n", .{ @tagName(self.parser.previous.kind), @tagName(self.parser.current.kind) });
+
         self.parser.previous = self.parser.current;
 
         while (true) {
@@ -139,11 +142,9 @@ pub const Compiler = struct {
 
         if (token.kind == .eof) {
             std.debug.print(" at end", .{});
-        }
-        else if (token.kind == .error_token) {
+        } else if (token.kind == .error_token) {
             // No print.
-        }
-        else {
+        } else {
             std.debug.print(" at '{s}'", .{token.text_ref});
         }
         std.debug.print(": {s} \n", .{message});
@@ -159,6 +160,7 @@ pub const Compiler = struct {
             self.advance();
             return;
         }
+        std.debug.print("WRONG --> {s} hmmm {d}\n", .{ @tagName(self.parser.current.kind), self.scanner.current });
         self.markErrorAtCurrent(message);
     }
 
@@ -169,7 +171,7 @@ pub const Compiler = struct {
     fn emitByte(self: *Compiler, byte: CodeContent) !void {
         try self.currentChunk().write(self.allocator, byte, self.parser.previous.line);
     }
-    
+
     fn emitCode(self: *Compiler, code: OpCode) !void {
         try self.emitByte(@intFromEnum(code));
     }
@@ -180,13 +182,13 @@ pub const Compiler = struct {
     }
 
     fn end(self: *Compiler) !void {
-        try self.emitReturn(); 
+        try self.emitReturn();
 
         if (DEBUG_PRINT_CODE) {
             if (!self.parser.had_error) {
                 self.currentChunk().disassemble("code");
             }
-        }  
+        }
     }
 
     fn number(self: *Compiler) !void {
@@ -232,7 +234,7 @@ pub const Compiler = struct {
         }
         try prefix_rule.?(self);
 
-        while (precendence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.previous.kind).precedence)) {
+        while (precendence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.current.kind).precedence)) {
             self.advance();
 
             const infix_rule = self.getRule(self.parser.previous.kind).infix;
@@ -244,7 +246,6 @@ pub const Compiler = struct {
     fn grouping(self: *Compiler) !void {
         try self.expression();
         self.consume(.right_paren, "Expect ')' after expression.");
-
     }
 
     fn emitReturn(self: *Compiler) !void {
@@ -257,7 +258,7 @@ pub const Compiler = struct {
 
     fn makeConstant(self: *Compiler, value: Value) !CodeContent {
         const constIdx = try self.currentChunk().addConstant(self.allocator, value);
-        
+
         if (constIdx > std.math.maxInt(CodeContent)) {
             self.markError("Too many constants in one chunk.");
             return 0;

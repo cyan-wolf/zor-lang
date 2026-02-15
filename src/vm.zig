@@ -46,6 +46,7 @@ pub const VM = struct {
         defer chunk.deinit(self.allocator);
 
         self.chunk = &chunk;
+        self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
         self.compiler = Compiler.init(source, self.allocator);
@@ -156,6 +157,7 @@ pub const VM = struct {
             error.CompileError => std.process.exit(65),
             // error.RuntimeError => std.process.exit(70),
             error.OutOfMemory => std.process.exit(1),
+            error.InvalidCharacter => std.process.exit(1),
         };
     }
 
