@@ -12,6 +12,8 @@ const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precendence;
 const ParseRule = precedence_mod.ParseRule;
 
+const DEBUG_PRINT_CODE = true;
+
 pub const Parser = struct {
     current: Token,
     previous: Token,
@@ -115,6 +117,10 @@ pub const Compiler = struct {
         }
     }
 
+    fn getRule(self: *const Compiler, kind: TokenKind) ParseRule {
+        return self.rules.get(kind);
+    }
+
     fn markErrorAtCurrent(self: *Compiler, message: []const u8) void {
         self.markErrorAt(self.parser.current, message);
     }
@@ -174,7 +180,13 @@ pub const Compiler = struct {
     }
 
     fn end(self: *Compiler) !void {
-        try self.emitReturn();   
+        try self.emitReturn(); 
+
+        if (DEBUG_PRINT_CODE) {
+            if (!self.parser.had_error) {
+                self.currentChunk().disassemble("code");
+            }
+        }  
     }
 
     fn number(self: *Compiler) !void {
@@ -195,12 +207,38 @@ pub const Compiler = struct {
     }
 
     fn binary(self: *Compiler) !void {
-        _ = self;
+        const op_kind = self.parser.previous.kind;
+        const rule = self.getRule(op_kind);
+
+        try self.parseWithPrecendece(rule.precedence.withOneMoreBindingPower());
+
+        switch (op_kind) {
+            .plus => try self.emitCode(.add),
+            .minus => try self.emitCode(.subtract),
+            .star => try self.emitCode(.multiply),
+            .slash => try self.emitCode(.divide),
+            else => unreachable,
+        }
     }
 
     fn parseWithPrecendece(self: *Compiler, precendence: Precendence) !void {
-        _ = self;
-        _ = precendence;
+        self.advance();
+
+        const prefix_rule = self.getRule(self.parser.previous.kind).prefix;
+
+        if (prefix_rule == null) {
+            self.markError("Expect expression");
+            return;
+        }
+        try prefix_rule.?(self);
+
+        while (precendence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.previous.kind).precedence)) {
+            self.advance();
+
+            const infix_rule = self.getRule(self.parser.previous.kind).infix;
+
+            try infix_rule.?(self);
+        }
     }
 
     fn grouping(self: *Compiler) !void {

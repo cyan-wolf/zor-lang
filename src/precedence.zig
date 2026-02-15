@@ -12,6 +12,14 @@ pub const Precendence = enum {
     unary, // ! -
     call, // . ()
     primary,
+
+    pub fn withOneMoreBindingPower(self: Precendence) Precendence {
+        return @enumFromInt(@intFromEnum(self) + 1);
+    }
+
+    pub fn hasLessOrEqBindingPowerThan(self: Precendence, other: Precendence) bool {
+        return @intFromEnum(self) <= @intFromEnum(other);
+    }
 };
 
 const ParseFnError = error{
