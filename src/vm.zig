@@ -42,11 +42,21 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, source: []const u8) !void {
-        // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source);
+        var chunk = Chunk.init();
+        defer chunk.deinit(self.allocator);
 
-        // The '?' is only to satisfy the compiler.
-        try self.compiler.?.compile();
+        self.chunk = &chunk;
+        self.ip = 0;
+
+        // NOTE: This might not have to be a field of VM.
+        self.compiler = Compiler.init(source, self.allocator);
+
+        const couldCompile = try self.compiler.?.compile(&chunk);
+        if (!couldCompile) {
+            return error.CompileError;
+        }
+
+        try self.run();
     }
 
     fn peek(self: *const VM) Value {
@@ -145,7 +155,9 @@ pub const VM = struct {
 
         self.interpret(content) catch |err| switch (err) {
             error.CompileError => std.process.exit(65),
-            error.RuntimeError => std.process.exit(70),
+            // error.RuntimeError => std.process.exit(70),
+            error.OutOfMemory => std.process.exit(1),
+            error.InvalidCharacter => std.process.exit(1),
         };
     }
 

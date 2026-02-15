@@ -17,7 +17,7 @@ pub const OpCode = enum(u8) {
         return switch (self) {
             .opreturn => 1,
             .constant => 2,
-            .negate => 2,
+            .negate => 1,
             .add => 1,
             .subtract => 1,
             .multiply => 1,
@@ -27,7 +27,7 @@ pub const OpCode = enum(u8) {
 };
 
 const CodeList = std.ArrayList(CodeContent);
-const LineList = std.ArrayList(u32);
+const LineList = std.ArrayList(usize);
 const ValueList = std.ArrayList(Value);
 
 pub const Chunk = struct {
@@ -43,7 +43,7 @@ pub const Chunk = struct {
         };
     }
 
-    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent, line: u32) !void {
+    pub fn write(self: *Chunk, allocator: Allocator, byte: CodeContent, line: usize) !void {
         try self.code.append(allocator, byte);
         try self.lines.append(allocator, line);
     }
@@ -104,11 +104,11 @@ pub const Chunk = struct {
 
                 std.debug.print("'\n", .{});
             },
-            .negate => std.debug.print("OP_NEGATE", .{}),
-            .add => std.debug.print("OP_ADD", .{}),
-            .subtract => std.debug.print("OP_SUBTRACT", .{}),
-            .multiply => std.debug.print("OP_MULTIPLY", .{}),
-            .divide => std.debug.print("OP_DIVIDE", .{}),
+            .negate => std.debug.print("OP_NEGATE\n", .{}),
+            .add => std.debug.print("OP_ADD\n", .{}),
+            .subtract => std.debug.print("OP_SUBTRACT\n", .{}),
+            .multiply => std.debug.print("OP_MULTIPLY\n", .{}),
+            .divide => std.debug.print("OP_DIVIDE\n", .{}),
         }
 
         return offset + instruction.size();

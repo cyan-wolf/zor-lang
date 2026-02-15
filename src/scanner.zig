@@ -11,7 +11,7 @@ pub const Scanner = struct {
     pub fn init(source: []const u8) Scanner {
         return .{
             .source = source,
-            .start = 9,
+            .start = 0,
             .current = 0,
             .line = 1,
         };
@@ -28,13 +28,15 @@ pub const Scanner = struct {
     }
 
     pub fn scanToken(self: *Scanner) Token {
+        self.skipWhitespace();
         self.start = self.current;
 
         if (self.isAtEnd()) {
             return self.makeToken(.eof);
         }
 
-        const c = self.advance();
+        const c = self.source[self.current];
+        self.advance();
 
         if (isAlpha(c)) {
             return self.scanIdentifier();
@@ -55,11 +57,12 @@ pub const Scanner = struct {
             '+' => self.makeToken(.plus),
             '/' => self.makeToken(.slash),
             '*' => self.makeToken(.star),
-            '|' => self.makeToken(if (self.match('=')) .bang_equal else .bang),
+            '!' => self.makeToken(if (self.match('=')) .bang_equal else .bang),
             '=' => self.makeToken(if (self.match('=')) .double_equal else .equal),
             '<' => self.makeToken(if (self.match('=')) .less_equal else .less),
             '>' => self.makeToken(if (self.match('=')) .greater_equal else .greater),
             '"' => self.scanStringLiteral(),
+            else => @panic("unknown character"),
         };
     }
 
@@ -145,26 +148,26 @@ pub const Scanner = struct {
             'v' => self.checkKeywordInSource(1, "ar", .k_var),
             'w' => self.checkKeywordInSource(1, "hile", .k_while),
             'f' => if (self.current - self.start > 1) {
-                switch (self.source[self.start + 1]) {
+                return switch (self.source[self.start + 1]) {
                     'a' => self.checkKeywordInSource(2, "lse", .k_false),
                     'o' => self.checkKeywordInSource(2, "r", .k_for),
                     'u' => self.checkKeywordInSource(2, "n", .k_fun),
                     else => .identifier,
-                }
+                };
             } else .identifier,
             't' => if (self.current - self.start > 1) {
-                switch (self.source[self.start + 1]) {
+                return switch (self.source[self.start + 1]) {
                     'h' => self.checkKeywordInSource(2, "is", .k_this),
                     'r' => self.checkKeywordInSource(2, "ue", .k_true),
-                    else => .identifier, 
-                }
+                    else => .identifier,
+                };
             } else .identifier,
             else => .identifier,
         };
     }
 
     fn checkKeywordInSource(self: *const Scanner, start: usize, rest: []const u8, keywordKind: TokenKind) TokenKind {
-        if ((self.current - self.start == start + rest.len) and (std.mem.eql(u8, self.source[self.start + start..rest.len+1], rest))) {
+        if ((self.current - self.start == start + rest.len) and (std.mem.eql(u8, self.source[self.start + start .. self.start + start + rest.len], rest))) {
             return keywordKind;
         }
         return .identifier;
@@ -186,17 +189,19 @@ pub const Scanner = struct {
         };
     }
 
-    fn advance(self: *Scanner) u8 {
+    fn advance(self: *Scanner) void {
         self.current += 1;
-        return self.source[self.current - 1];
     }
 
     fn peek(self: *const Scanner) u8 {
+        if (self.isAtEnd()) {
+            return '\x00';
+        }
         return self.source[self.current];
     }
 
     fn peekNext(self: *const Scanner) u8 {
-        if (self.isAtEnd()) {
+        if (self.current + 1 >= self.source.len) {
             // Return a sentinel that signifies that the
             // end has already been reached.
             return '\x00';
@@ -208,7 +213,7 @@ pub const Scanner = struct {
         if (self.isAtEnd()) {
             return false;
         } else if (self.source[self.current] == expected) {
-            return false;
+            return true;
         }
         self.current += 1;
         return true;
