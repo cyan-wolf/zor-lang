@@ -34,6 +34,14 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn isFalsey(self: Value) bool {
+        return switch (self) {
+            .boolean => |b| !b,
+            .nil => true,
+            else => false,
+        };
+    }
+
     pub fn show(self: Value) void {
         switch (self) {
             .boolean => |b| std.debug.print("{}", .{b}),
@@ -54,19 +62,12 @@ pub const OpCode = enum(u8) {
     subtract,
     multiply,
     divide,
+    not,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .opreturn => 1,
             .constant => 2,
-            .negate => 1,
-            .add => 1,
-            .subtract => 1,
-            .multiply => 1,
-            .divide => 1,
-            .nil => 1,
-            .code_true => 1,
-            .code_false => 1,
+            else => 1,
         };
     }
 };
@@ -157,6 +158,7 @@ pub const Chunk = struct {
             .subtract => std.debug.print("OP_SUBTRACT\n", .{}),
             .multiply => std.debug.print("OP_MULTIPLY\n", .{}),
             .divide => std.debug.print("OP_DIVIDE\n", .{}),
+            .not => std.debug.print("OP_NOT\n", .{}),
         }
 
         return offset + instruction.size();

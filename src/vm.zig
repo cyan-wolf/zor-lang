@@ -11,7 +11,7 @@ const Compiler = @import("compiler.zig").Compiler;
 
 pub const DEBUG_TRACE_EXECUTION = true;
 
-pub const InterpretError = error {
+pub const InterpretError = error{
     CompileError,
     RuntimeError,
 };
@@ -73,7 +73,7 @@ pub const VM = struct {
         return content;
     }
 
-    // Note: We assume that the current byte is a valid op code. 
+    // Note: We assume that the current byte is a valid op code.
     fn readCode(self: *VM) OpCode {
         return @enumFromInt(self.readByte());
     }
@@ -87,10 +87,10 @@ pub const VM = struct {
         if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
             try self.reportRuntimeError("Operands must be numbers");
         }
-        
+
         const b = self.pop().asNumber();
         const a = self.pop().asNumber();
-        
+
         try self.push(Value.fromNumber(switch (op) {
             .add => a + b,
             .sub => a - b,
@@ -115,7 +115,7 @@ pub const VM = struct {
                 _ = self.chunk.?.disassembleInstruction(self.ip);
             }
 
-            // The instruction pointer should always end up pointing to 
+            // The instruction pointer should always end up pointing to
             // a valid op code at the start of a run loop.
             const instruction = self.readCode();
 
@@ -142,6 +142,7 @@ pub const VM = struct {
                 .subtract => try self.binaryOp(.sub),
                 .multiply => try self.binaryOp(.mul),
                 .divide => try self.binaryOp(.div),
+                .not => try self.push(Value.fromBoolean(self.pop().isFalsey())),
             }
         }
     }
@@ -168,11 +169,11 @@ pub const VM = struct {
     }
 
     fn reportRuntimeError(self: *VM, message: []const u8) !void {
-        const instructionIdx = self.ip - self.chunk.?.code.items.len - 1;
+        const instructionIdx = self.ip;
         const line = self.chunk.?.lines.items[instructionIdx];
 
-        std.debug.print("{s} [line {d}] in script", .{message, line});
-        
+        std.debug.print("{s} [line {d}] in script\n", .{ message, line });
+
         // Reset the stack.
         self.stack.clearAndFree(self.allocator);
 

@@ -61,7 +61,7 @@ pub const Compiler = struct {
                 .semicolon = .{ .prefix = null, .infix = null, .precedence = .none },
                 .slash = .{ .prefix = null, .infix = Compiler.binary, .precedence = .factor },
                 .star = .{ .prefix = null, .infix = Compiler.binary, .precedence = .factor },
-                .bang = .{ .prefix = null, .infix = null, .precedence = .none },
+                .bang = .{ .prefix = Compiler.unary, .infix = null, .precedence = .none },
                 .bang_equal = .{ .prefix = null, .infix = null, .precedence = .none },
                 .equal = .{ .prefix = null, .infix = null, .precedence = .none },
                 .double_equal = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -204,6 +204,7 @@ pub const Compiler = struct {
 
         switch (prev_kind) {
             .minus => try self.emitCode(.negate),
+            .bang => try self.emitCode(.not),
             else => unreachable,
         }
     }
