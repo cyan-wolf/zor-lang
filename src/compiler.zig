@@ -76,16 +76,16 @@ pub const Compiler = struct {
                 .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_class = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_else = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_false = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_false = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
                 .k_for = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_fun = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_if = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_nil = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_nil = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
                 .k_print = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_return = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_super = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_this = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_true = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_true = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
                 .k_var = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_while = .{ .prefix = null, .infix = null, .precedence = .none },
                 .error_token = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -219,6 +219,17 @@ pub const Compiler = struct {
             .minus => try self.emitCode(.subtract),
             .star => try self.emitCode(.multiply),
             .slash => try self.emitCode(.divide),
+            else => unreachable,
+        }
+    }
+
+    fn literal(self: *Compiler) !void {
+        const op_kind = self.parser.previous.kind;
+
+        switch(op_kind) {
+            .k_false => try self.emitCode(.code_false),
+            .k_nil => try self.emitCode(.nil),
+            .k_true => try self.emitCode(.code_true),
             else => unreachable,
         }
     }

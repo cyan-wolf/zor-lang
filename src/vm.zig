@@ -9,10 +9,6 @@ const Value = chunk_mod.Value;
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
 
-fn printValue(value: Value) void {
-    std.debug.print("{d}", .{Value.asNumber(value)});
-}
-
 pub const DEBUG_TRACE_EXECUTION = true;
 
 pub const InterpretError = error {
@@ -110,7 +106,7 @@ pub const VM = struct {
                 std.debug.print("        ", .{});
                 for (self.stack.items) |slot| {
                     std.debug.print("[ ", .{});
-                    printValue(slot);
+                    slot.show();
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
@@ -125,7 +121,7 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
-                    printValue(self.pop());
+                    self.pop().show();
                     std.debug.print("\n", .{});
                     return;
                 },
@@ -133,6 +129,9 @@ pub const VM = struct {
                     const constant = self.readConstant();
                     try self.push(constant);
                 },
+                .nil => try self.push(Value.fromNil()),
+                .code_true => try self.push(Value.fromBoolean(true)),
+                .code_false => try self.push(Value.fromBoolean(false)),
                 .negate => {
                     switch (self.peek(0)) {
                         .number => |n| try self.push(Value.fromNumber(-n)),

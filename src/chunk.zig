@@ -17,27 +17,38 @@ pub const Value = union(enum) {
     }
 
     pub fn fromNil() Value {
-        return .{.nil = {}};
+        return .{ .nil = {} };
     }
 
     pub fn asNumber(self: Value) f64 {
-        return switch(self) {
+        return switch (self) {
             .number => |n| n,
             else => unreachable,
         };
     }
 
     pub fn isNumber(self: Value) bool {
-        return switch(self) {
+        return switch (self) {
             .number => true,
             else => false,
         };
+    }
+
+    pub fn show(self: Value) void {
+        switch (self) {
+            .boolean => |b| std.debug.print("{}", .{b}),
+            .nil => std.debug.print("nil", .{}),
+            .number => |n| std.debug.print("{d}", .{n}),
+        }
     }
 };
 
 pub const OpCode = enum(u8) {
     opreturn,
     constant,
+    nil,
+    code_true,
+    code_false,
     negate,
     add,
     subtract,
@@ -53,6 +64,9 @@ pub const OpCode = enum(u8) {
             .subtract => 1,
             .multiply => 1,
             .divide => 1,
+            .nil => 1,
+            .code_true => 1,
+            .code_false => 1,
         };
     }
 };
@@ -135,6 +149,9 @@ pub const Chunk = struct {
 
                 std.debug.print("'\n", .{});
             },
+            .nil => std.debug.print("OP_NIL\n", .{}),
+            .code_true => std.debug.print("OP_TRUE\n", .{}),
+            .code_false => std.debug.print("OP_FALSE\n", .{}),
             .negate => std.debug.print("OP_NEGATE\n", .{}),
             .add => std.debug.print("OP_ADD\n", .{}),
             .subtract => std.debug.print("OP_SUBTRACT\n", .{}),
