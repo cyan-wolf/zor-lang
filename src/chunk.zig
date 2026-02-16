@@ -42,6 +42,23 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn equals(self: Value, other: Value) bool {
+        return switch (self) {
+            .boolean => |b1| switch (other) {
+                .boolean => |b2| b1 == b2,
+                else => false,
+            },
+            .nil => switch (other) {
+                .nil => true,
+                else => false,
+            },
+            .number => |n1| switch (other) {
+                .number => |n2| n1 == n2,
+                else => false,
+            },
+        };
+    }
+
     pub fn show(self: Value) void {
         switch (self) {
             .boolean => |b| std.debug.print("{}", .{b}),
@@ -58,6 +75,9 @@ pub const OpCode = enum(u8) {
     code_true,
     code_false,
     negate,
+    equal,
+    greater,
+    less,
     add,
     subtract,
     multiply,
@@ -143,10 +163,10 @@ pub const Chunk = struct {
                 const constIdx: usize = @intCast(self.code.items[offset + 1]);
                 std.debug.print("OP_CONSTANT {d:4} '", .{constIdx});
 
-                // const value = self.constants.items[constIdx];
+                const value = self.constants.items[constIdx];
 
                 // Print the value.
-                // std.debug.print("{d}", .{value});
+                value.show();
 
                 std.debug.print("'\n", .{});
             },
@@ -154,6 +174,9 @@ pub const Chunk = struct {
             .code_true => std.debug.print("OP_TRUE\n", .{}),
             .code_false => std.debug.print("OP_FALSE\n", .{}),
             .negate => std.debug.print("OP_NEGATE\n", .{}),
+            .equal => std.debug.print("OP_EQUAL\n", .{}),
+            .greater => std.debug.print("OP_GREATER\n", .{}),
+            .less => std.debug.print("OP_LESS\n", .{}),
             .add => std.debug.print("OP_ADD\n", .{}),
             .subtract => std.debug.print("OP_SUBTRACT\n", .{}),
             .multiply => std.debug.print("OP_MULTIPLY\n", .{}),

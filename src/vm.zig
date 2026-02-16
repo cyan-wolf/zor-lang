@@ -83,7 +83,7 @@ pub const VM = struct {
         return self.chunk.?.constants.items[constantIdx];
     }
 
-    inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div }) !void {
+    inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div, less, greater }) !void {
         if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
             try self.reportRuntimeError("Operands must be numbers");
         }
@@ -91,12 +91,14 @@ pub const VM = struct {
         const b = self.pop().asNumber();
         const a = self.pop().asNumber();
 
-        try self.push(Value.fromNumber(switch (op) {
-            .add => a + b,
-            .sub => a - b,
-            .mul => a * b,
-            .div => a / b,
-        }));
+        try self.push(switch (op) {
+            .add => Value.fromNumber(a + b),
+            .sub => Value.fromNumber(a - b),
+            .mul => Value.fromNumber(a * b),
+            .div => Value.fromNumber(a / b),
+            .less => Value.fromBoolean(a < b),
+            .greater => Value.fromBoolean(a > b),
+        });
     }
 
     fn run(self: *VM) !void {
@@ -132,12 +134,20 @@ pub const VM = struct {
                 .nil => try self.push(Value.fromNil()),
                 .code_true => try self.push(Value.fromBoolean(true)),
                 .code_false => try self.push(Value.fromBoolean(false)),
+                .equal => {
+                    const b = self.pop();
+                    const a = self.pop();
+
+                    try self.push(Value.fromBoolean(a.equals(b)));
+                },
                 .negate => {
                     switch (self.peek(0)) {
                         .number => |n| try self.push(Value.fromNumber(-n)),
                         else => try self.reportRuntimeError("operand must be a number"),
                     }
                 },
+                .greater => try self.binaryOp(.greater),
+                .less => try self.binaryOp(.less),
                 .add => try self.binaryOp(.add),
                 .subtract => try self.binaryOp(.sub),
                 .multiply => try self.binaryOp(.mul),
