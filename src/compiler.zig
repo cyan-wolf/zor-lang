@@ -192,7 +192,7 @@ pub const Compiler = struct {
     }
 
     fn number(self: *Compiler) !void {
-        const value: Value = try std.fmt.parseFloat(Value, self.parser.previous.text_ref);
+        const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
     }
 

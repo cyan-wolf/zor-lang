@@ -2,7 +2,38 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const CodeContent = u8;
-pub const Value = f64;
+
+pub const Value = union(enum) {
+    number: f64,
+    boolean: bool,
+    nil: void,
+
+    pub fn fromNumber(n: f64) Value {
+        return .{ .number = n };
+    }
+
+    pub fn fromBoolean(b: bool) Value {
+        return .{ .boolean = b };
+    }
+
+    pub fn fromNil() Value {
+        return .{.nil = {}};
+    }
+
+    pub fn asNumber(self: Value) f64 {
+        return switch(self) {
+            .number => |n| n,
+            else => unreachable,
+        };
+    }
+
+    pub fn isNumber(self: Value) bool {
+        return switch(self) {
+            .number => true,
+            else => false,
+        };
+    }
+};
 
 pub const OpCode = enum(u8) {
     opreturn,
@@ -97,10 +128,10 @@ pub const Chunk = struct {
                 const constIdx: usize = @intCast(self.code.items[offset + 1]);
                 std.debug.print("OP_CONSTANT {d:4} '", .{constIdx});
 
-                const value = self.constants.items[constIdx];
+                // const value = self.constants.items[constIdx];
 
                 // Print the value.
-                std.debug.print("{d}", .{value});
+                // std.debug.print("{d}", .{value});
 
                 std.debug.print("'\n", .{});
             },

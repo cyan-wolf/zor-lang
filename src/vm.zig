@@ -10,7 +10,7 @@ const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
 
 fn printValue(value: Value) void {
-    std.debug.print("{d}", .{value});
+    std.debug.print("{d}", .{Value.asNumber(value)});
 }
 
 pub const DEBUG_TRACE_EXECUTION = true;
@@ -59,8 +59,8 @@ pub const VM = struct {
         try self.run();
     }
 
-    fn peek(self: *const VM) Value {
-        return self.stack.items[self.stack.items.len];
+    fn peek(self: *const VM, distance: usize) Value {
+        return self.stack.items[self.stack.items.len - 1 - distance];
     }
 
     fn push(self: *VM, value: Value) !void {
@@ -88,15 +88,19 @@ pub const VM = struct {
     }
 
     inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div }) !void {
-        const b = self.pop();
-        const a = self.pop();
+        if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
+            try self.reportRuntimeError("Operands must be numbers");
+        }
         
-        try self.push(switch (op) {
+        const b = self.pop().asNumber();
+        const a = self.pop().asNumber();
+        
+        try self.push(Value.fromNumber(switch (op) {
             .add => a + b,
             .sub => a - b,
             .mul => a * b,
             .div => a / b,
-        });
+        }));
     }
 
     fn run(self: *VM) !void {
@@ -130,7 +134,10 @@ pub const VM = struct {
                     try self.push(constant);
                 },
                 .negate => {
-                    try self.push(-self.pop());
+                    switch (self.peek(0)) {
+                        .number => |n| try self.push(Value.fromNumber(-n)),
+                        else => try self.reportRuntimeError("operand must be a number"),
+                    }
                 },
                 .add => try self.binaryOp(.add),
                 .subtract => try self.binaryOp(.sub),
@@ -155,10 +162,22 @@ pub const VM = struct {
 
         self.interpret(content) catch |err| switch (err) {
             error.CompileError => std.process.exit(65),
-            // error.RuntimeError => std.process.exit(70),
+            error.RuntimeError => std.process.exit(70),
             error.OutOfMemory => std.process.exit(1),
             error.InvalidCharacter => std.process.exit(1),
         };
+    }
+
+    fn reportRuntimeError(self: *VM, message: []const u8) !void {
+        const instructionIdx = self.ip - self.chunk.?.code.items.len - 1;
+        const line = self.chunk.?.lines.items[instructionIdx];
+
+        std.debug.print("{s} [line {d}] in script", .{message, line});
+        
+        // Reset the stack.
+        self.stack.clearAndFree(self.allocator);
+
+        return error.RuntimeError;
     }
 
     pub fn deinit(self: *VM) void {
