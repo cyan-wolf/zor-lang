@@ -212,8 +212,8 @@ pub const Scanner = struct {
     fn match(self: *Scanner, expected: u8) bool {
         if (self.isAtEnd()) {
             return false;
-        } else if (self.source[self.current] == expected) {
-            return true;
+        } else if (self.source[self.current] != expected) {
+            return false;
         }
         self.current += 1;
         return true;
