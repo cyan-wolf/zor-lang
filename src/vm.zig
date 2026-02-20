@@ -9,13 +9,9 @@ const Value = chunk_mod.Value;
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
 
-fn printValue(value: Value) void {
-    std.debug.print("{d}", .{value});
-}
-
 pub const DEBUG_TRACE_EXECUTION = true;
 
-pub const InterpretError = error {
+pub const InterpretError = error{
     CompileError,
     RuntimeError,
 };
@@ -59,8 +55,8 @@ pub const VM = struct {
         try self.run();
     }
 
-    fn peek(self: *const VM) Value {
-        return self.stack.items[self.stack.items.len];
+    fn peek(self: *const VM, distance: usize) Value {
+        return self.stack.items[self.stack.items.len - 1 - distance];
     }
 
     fn push(self: *VM, value: Value) !void {
@@ -77,7 +73,7 @@ pub const VM = struct {
         return content;
     }
 
-    // Note: We assume that the current byte is a valid op code. 
+    // Note: We assume that the current byte is a valid op code.
     fn readCode(self: *VM) OpCode {
         return @enumFromInt(self.readByte());
     }
@@ -87,15 +83,21 @@ pub const VM = struct {
         return self.chunk.?.constants.items[constantIdx];
     }
 
-    inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div }) !void {
-        const b = self.pop();
-        const a = self.pop();
-        
+    inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div, less, greater }) !void {
+        if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
+            try self.reportRuntimeError("Operands must be numbers");
+        }
+
+        const b = self.pop().asNumber();
+        const a = self.pop().asNumber();
+
         try self.push(switch (op) {
-            .add => a + b,
-            .sub => a - b,
-            .mul => a * b,
-            .div => a / b,
+            .add => Value.fromNumber(a + b),
+            .sub => Value.fromNumber(a - b),
+            .mul => Value.fromNumber(a * b),
+            .div => Value.fromNumber(a / b),
+            .less => Value.fromBoolean(a < b),
+            .greater => Value.fromBoolean(a > b),
         });
     }
 
@@ -106,7 +108,7 @@ pub const VM = struct {
                 std.debug.print("        ", .{});
                 for (self.stack.items) |slot| {
                     std.debug.print("[ ", .{});
-                    printValue(slot);
+                    slot.show();
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
@@ -115,13 +117,13 @@ pub const VM = struct {
                 _ = self.chunk.?.disassembleInstruction(self.ip);
             }
 
-            // The instruction pointer should always end up pointing to 
+            // The instruction pointer should always end up pointing to
             // a valid op code at the start of a run loop.
             const instruction = self.readCode();
 
             switch (instruction) {
                 .opreturn => {
-                    printValue(self.pop());
+                    self.pop().show();
                     std.debug.print("\n", .{});
                     return;
                 },
@@ -129,13 +131,28 @@ pub const VM = struct {
                     const constant = self.readConstant();
                     try self.push(constant);
                 },
-                .negate => {
-                    try self.push(-self.pop());
+                .nil => try self.push(Value.fromNil()),
+                .code_true => try self.push(Value.fromBoolean(true)),
+                .code_false => try self.push(Value.fromBoolean(false)),
+                .equal => {
+                    const b = self.pop();
+                    const a = self.pop();
+
+                    try self.push(Value.fromBoolean(a.equals(b)));
                 },
+                .negate => {
+                    switch (self.peek(0)) {
+                        .number => |n| try self.push(Value.fromNumber(-n)),
+                        else => try self.reportRuntimeError("operand must be a number"),
+                    }
+                },
+                .greater => try self.binaryOp(.greater),
+                .less => try self.binaryOp(.less),
                 .add => try self.binaryOp(.add),
                 .subtract => try self.binaryOp(.sub),
                 .multiply => try self.binaryOp(.mul),
                 .divide => try self.binaryOp(.div),
+                .not => try self.push(Value.fromBoolean(self.pop().isFalsey())),
             }
         }
     }
@@ -155,10 +172,22 @@ pub const VM = struct {
 
         self.interpret(content) catch |err| switch (err) {
             error.CompileError => std.process.exit(65),
-            // error.RuntimeError => std.process.exit(70),
+            error.RuntimeError => std.process.exit(70),
             error.OutOfMemory => std.process.exit(1),
             error.InvalidCharacter => std.process.exit(1),
         };
+    }
+
+    fn reportRuntimeError(self: *VM, message: []const u8) !void {
+        const instructionIdx = self.ip;
+        const line = self.chunk.?.lines.items[instructionIdx];
+
+        std.debug.print("{s} [line {d}] in script\n", .{ message, line });
+
+        // Reset the stack.
+        self.stack.clearAndFree(self.allocator);
+
+        return error.RuntimeError;
     }
 
     pub fn deinit(self: *VM) void {

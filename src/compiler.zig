@@ -61,14 +61,14 @@ pub const Compiler = struct {
                 .semicolon = .{ .prefix = null, .infix = null, .precedence = .none },
                 .slash = .{ .prefix = null, .infix = Compiler.binary, .precedence = .factor },
                 .star = .{ .prefix = null, .infix = Compiler.binary, .precedence = .factor },
-                .bang = .{ .prefix = null, .infix = null, .precedence = .none },
-                .bang_equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .bang = .{ .prefix = Compiler.unary, .infix = null, .precedence = .none },
+                .bang_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .equality },
                 .equal = .{ .prefix = null, .infix = null, .precedence = .none },
-                .double_equal = .{ .prefix = null, .infix = null, .precedence = .none },
-                .greater = .{ .prefix = null, .infix = null, .precedence = .none },
-                .greater_equal = .{ .prefix = null, .infix = null, .precedence = .none },
-                .less = .{ .prefix = null, .infix = null, .precedence = .none },
-                .less_equal = .{ .prefix = null, .infix = null, .precedence = .none },
+                .double_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .equality },
+                .greater = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
+                .greater_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
+                .less = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
+                .less_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .identifier = .{ .prefix = null, .infix = null, .precedence = .none },
                 .string = .{ .prefix = null, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
@@ -76,16 +76,16 @@ pub const Compiler = struct {
                 .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_class = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_else = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_false = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_false = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
                 .k_for = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_fun = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_if = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_nil = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_nil = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
                 .k_print = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_return = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_super = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_this = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_true = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_true = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
                 .k_var = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_while = .{ .prefix = null, .infix = null, .precedence = .none },
                 .error_token = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -192,7 +192,7 @@ pub const Compiler = struct {
     }
 
     fn number(self: *Compiler) !void {
-        const value: Value = try std.fmt.parseFloat(Value, self.parser.previous.text_ref);
+        const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
     }
 
@@ -204,6 +204,7 @@ pub const Compiler = struct {
 
         switch (prev_kind) {
             .minus => try self.emitCode(.negate),
+            .bang => try self.emitCode(.not),
             else => unreachable,
         }
     }
@@ -215,10 +216,27 @@ pub const Compiler = struct {
         try self.parseWithPrecendece(rule.precedence.withOneMoreBindingPower());
 
         switch (op_kind) {
+            .bang_equal => try self.emitCodeAndOperand(.equal, @intFromEnum(OpCode.not)),
+            .double_equal => try self.emitCode(.equal),
+            .greater => try self.emitCode(.greater),
+            .greater_equal => try self.emitCodeAndOperand(.less, @intFromEnum(OpCode.not)), 
+            .less => try self.emitCode(.less),
+            .less_equal => try self.emitCodeAndOperand(.greater, @intFromEnum(OpCode.not)),
             .plus => try self.emitCode(.add),
             .minus => try self.emitCode(.subtract),
             .star => try self.emitCode(.multiply),
             .slash => try self.emitCode(.divide),
+            else => unreachable,
+        }
+    }
+
+    fn literal(self: *Compiler) !void {
+        const op_kind = self.parser.previous.kind;
+
+        switch(op_kind) {
+            .k_false => try self.emitCode(.code_false),
+            .k_nil => try self.emitCode(.nil),
+            .k_true => try self.emitCode(.code_true),
             else => unreachable,
         }
     }

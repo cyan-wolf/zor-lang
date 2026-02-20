@@ -2,26 +2,92 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const CodeContent = u8;
-pub const Value = f64;
+
+pub const Value = union(enum) {
+    number: f64,
+    boolean: bool,
+    nil: void,
+
+    pub fn fromNumber(n: f64) Value {
+        return .{ .number = n };
+    }
+
+    pub fn fromBoolean(b: bool) Value {
+        return .{ .boolean = b };
+    }
+
+    pub fn fromNil() Value {
+        return .{ .nil = {} };
+    }
+
+    pub fn asNumber(self: Value) f64 {
+        return switch (self) {
+            .number => |n| n,
+            else => unreachable,
+        };
+    }
+
+    pub fn isNumber(self: Value) bool {
+        return switch (self) {
+            .number => true,
+            else => false,
+        };
+    }
+
+    pub fn isFalsey(self: Value) bool {
+        return switch (self) {
+            .boolean => |b| !b,
+            .nil => true,
+            else => false,
+        };
+    }
+
+    pub fn equals(self: Value, other: Value) bool {
+        return switch (self) {
+            .boolean => |b1| switch (other) {
+                .boolean => |b2| b1 == b2,
+                else => false,
+            },
+            .nil => switch (other) {
+                .nil => true,
+                else => false,
+            },
+            .number => |n1| switch (other) {
+                .number => |n2| n1 == n2,
+                else => false,
+            },
+        };
+    }
+
+    pub fn show(self: Value) void {
+        switch (self) {
+            .boolean => |b| std.debug.print("{}", .{b}),
+            .nil => std.debug.print("nil", .{}),
+            .number => |n| std.debug.print("{d}", .{n}),
+        }
+    }
+};
 
 pub const OpCode = enum(u8) {
     opreturn,
     constant,
+    nil,
+    code_true,
+    code_false,
     negate,
+    equal,
+    greater,
+    less,
     add,
     subtract,
     multiply,
     divide,
+    not,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .opreturn => 1,
             .constant => 2,
-            .negate => 1,
-            .add => 1,
-            .subtract => 1,
-            .multiply => 1,
-            .divide => 1,
+            else => 1,
         };
     }
 };
@@ -100,15 +166,22 @@ pub const Chunk = struct {
                 const value = self.constants.items[constIdx];
 
                 // Print the value.
-                std.debug.print("{d}", .{value});
+                value.show();
 
                 std.debug.print("'\n", .{});
             },
+            .nil => std.debug.print("OP_NIL\n", .{}),
+            .code_true => std.debug.print("OP_TRUE\n", .{}),
+            .code_false => std.debug.print("OP_FALSE\n", .{}),
             .negate => std.debug.print("OP_NEGATE\n", .{}),
+            .equal => std.debug.print("OP_EQUAL\n", .{}),
+            .greater => std.debug.print("OP_GREATER\n", .{}),
+            .less => std.debug.print("OP_LESS\n", .{}),
             .add => std.debug.print("OP_ADD\n", .{}),
             .subtract => std.debug.print("OP_SUBTRACT\n", .{}),
             .multiply => std.debug.print("OP_MULTIPLY\n", .{}),
             .divide => std.debug.print("OP_DIVIDE\n", .{}),
+            .not => std.debug.print("OP_NOT\n", .{}),
         }
 
         return offset + instruction.size();
