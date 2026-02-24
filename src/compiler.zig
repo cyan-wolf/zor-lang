@@ -4,7 +4,10 @@ const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const OpCode = chunk_mod.OpCode;
 const CodeContent = chunk_mod.CodeContent;
-const Value = @import("value.zig").Value;
+const value_mod = @import("value.zig");
+const Value = value_mod.Value;
+const Obj = value_mod.Obj;
+const ObjString = value_mod.ObjString;
 const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
@@ -70,7 +73,7 @@ pub const Compiler = struct {
                 .less = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .less_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .identifier = .{ .prefix = null, .infix = null, .precedence = .none },
-                .string = .{ .prefix = null, .infix = null, .precedence = .none },
+                .string = .{ .prefix = Compiler.string, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
                 .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -194,6 +197,14 @@ pub const Compiler = struct {
     fn number(self: *Compiler) !void {
         const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
+    }
+
+    fn string(self: *Compiler) !void {
+        // TODO: read the string from the parser.
+        const string_data = "TEST";
+        const obj_string = try ObjString.cloneString(self.allocator, string_data);
+
+        try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
     }
 
     fn unary(self: *Compiler) !void {
