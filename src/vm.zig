@@ -4,7 +4,7 @@ const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const CodeContent = chunk_mod.CodeContent;
 const OpCode = chunk_mod.OpCode;
-const Value = chunk_mod.Value;
+const Value = @import("value.zig").Value;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
