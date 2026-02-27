@@ -6,6 +6,7 @@ const CodeContent = chunk_mod.CodeContent;
 const OpCode = chunk_mod.OpCode;
 const value_mod = @import("value.zig");
 const Value = value_mod.Value;
+const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
 
 const Cli = @import("cli.zig").Cli;
@@ -22,6 +23,7 @@ pub const VM = struct {
     chunk: ?*Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
+    objects: ?*Obj,
 
     allocator: Allocator,
     cli: Cli,
@@ -32,6 +34,7 @@ pub const VM = struct {
             .chunk = null,
             .ip = 0,
             .stack = .empty,
+            .objects = null,
 
             .allocator = allocator,
             .cli = cli,
@@ -47,7 +50,7 @@ pub const VM = struct {
         self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator);
+        self.compiler = Compiler.init(source, self.allocator, self);
 
         const couldCompile = try self.compiler.?.compile(&chunk);
         if (!couldCompile) {
@@ -113,8 +116,8 @@ pub const VM = struct {
         // lead to a memory leak.
         defer self.allocator.free(concat_data);
 
-        const result = try ObjString.cloneString(self.allocator, concat_data);
-        try self.push(Value.fromString(result));
+        const string = try self.createObjString(concat_data);
+        try self.push(Value.fromObj(string.as_obj()));
     }
 
     fn run(self: *VM) !void {
@@ -202,6 +205,17 @@ pub const VM = struct {
         };
     }
 
+    pub fn createObjString(self: *VM, data: []const u8) !*ObjString {
+        const string = try ObjString.cloneString(self.allocator, data);
+        try self.registerAllocatedObj(string.as_obj());
+        return string;
+    }
+
+    fn registerAllocatedObj(self: *VM, obj: *Obj) !void {
+        obj.next = self.objects;
+        self.objects = obj;
+    }
+
     fn reportRuntimeError(self: *VM, message: []const u8) !void {
         const instructionIdx = self.ip;
         const line = self.chunk.?.lines.items[instructionIdx];
@@ -214,7 +228,18 @@ pub const VM = struct {
         return error.RuntimeError;
     }
 
+    fn freeObjects(self: *VM) void {
+        var curr = self.objects;
+
+        while (curr != null) {
+            defer curr.?.deinit(self.allocator);
+            curr = curr.?.next;
+        }
+    }
+
     pub fn deinit(self: *VM) void {
+        self.freeObjects();
+
         self.chunk = null;
         self.stack.deinit(self.allocator);
     }

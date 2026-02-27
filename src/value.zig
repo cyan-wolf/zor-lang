@@ -22,10 +22,6 @@ pub const Value = union(enum) {
         return .{ .obj = o };
     }
 
-    pub fn fromString(s: *ObjString) Value {
-        return Value.fromObj(@ptrCast(s));
-    }
-
     pub fn asNumber(self: Value) f64 {
         return switch (self) {
             .number => |n| n,
@@ -105,6 +101,7 @@ pub const ObjKind = enum {
 
 pub const Obj = struct {
     kind: ObjKind,
+    next: ?*Obj,
 
     pub fn is_equal(self: *const Obj, other: *const Obj) bool {
         switch (self.kind) {
@@ -135,6 +132,16 @@ pub const Obj = struct {
     fn as_obj_string_const(self: *const Obj) *const ObjString {
         return @alignCast(@fieldParentPtr("obj", self));
     }
+
+    pub fn deinit(self: *Obj, allocator: std.mem.Allocator) void {
+        switch (self.kind) {
+            .string => {
+                const string = self.as_obj_string_mut();
+                defer allocator.free(string.data);
+                defer allocator.destroy(string);
+            },
+        }
+    }
 };
 
 pub const ObjString = struct {
@@ -150,10 +157,15 @@ pub const ObjString = struct {
         ptr.* = .{
             .obj = .{
                 .kind = .string,
+                .next = null,
             },
             .data = new_string_data,
         };
 
         return ptr;
+    }
+
+    pub fn as_obj(self: *ObjString) *Obj {
+        return @ptrCast(self);
     }
 };

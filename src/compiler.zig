@@ -14,6 +14,7 @@ const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precendence;
 const ParseRule = precedence_mod.ParseRule;
+const VM = @import("vm.zig").VM;
 
 const DEBUG_PRINT_CODE = true;
 
@@ -40,10 +41,11 @@ pub const Compiler = struct {
     complingChunk: *Chunk,
 
     allocator: std.mem.Allocator,
+    vm: *VM,
 
     rules: std.enums.EnumArray(TokenKind, ParseRule),
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator) Compiler {
+    pub fn init(source: []const u8, alloctor: std.mem.Allocator, vm: *VM) Compiler {
         return .{
             .source = source,
             .scanner = Scanner.init(source),
@@ -51,6 +53,7 @@ pub const Compiler = struct {
             .complingChunk = undefined,
 
             .allocator = alloctor,
+            .vm = vm,
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -200,9 +203,8 @@ pub const Compiler = struct {
     }
 
     fn string(self: *Compiler) !void {
-        // TODO: read the string from the parser.
-        const string_data = "TEST";
-        const obj_string = try ObjString.cloneString(self.allocator, string_data);
+        const string_data = self.parser.previous.text_ref[1 .. self.parser.previous.text_ref.len - 1];
+        const obj_string = try self.vm.createObjString(string_data);
 
         try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
     }
@@ -230,7 +232,7 @@ pub const Compiler = struct {
             .bang_equal => try self.emitCodeAndOperand(.equal, @intFromEnum(OpCode.not)),
             .double_equal => try self.emitCode(.equal),
             .greater => try self.emitCode(.greater),
-            .greater_equal => try self.emitCodeAndOperand(.less, @intFromEnum(OpCode.not)), 
+            .greater_equal => try self.emitCodeAndOperand(.less, @intFromEnum(OpCode.not)),
             .less => try self.emitCode(.less),
             .less_equal => try self.emitCodeAndOperand(.greater, @intFromEnum(OpCode.not)),
             .plus => try self.emitCode(.add),
@@ -244,7 +246,7 @@ pub const Compiler = struct {
     fn literal(self: *Compiler) !void {
         const op_kind = self.parser.previous.kind;
 
-        switch(op_kind) {
+        switch (op_kind) {
             .k_false => try self.emitCode(.code_false),
             .k_nil => try self.emitCode(.nil),
             .k_true => try self.emitCode(.code_true),
