@@ -22,6 +22,10 @@ pub const Value = union(enum) {
         return .{ .obj = o };
     }
 
+    pub fn fromString(s: *ObjString) Value {
+        return Value.fromObj(@ptrCast(s));
+    }
+
     pub fn asNumber(self: Value) f64 {
         return switch (self) {
             .number => |n| n,
@@ -32,6 +36,26 @@ pub const Value = union(enum) {
     pub fn isNumber(self: Value) bool {
         return switch (self) {
             .number => true,
+            else => false,
+        };
+    }
+
+    pub fn asString(self: Value) *ObjString {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .string => o.as_obj_string_mut(),
+                // else => unreachable,
+            },
+            else => unreachable,
+        };
+    }
+
+    pub fn isString(self: Value) bool {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .string => true,
+                // else => false,
+            },
             else => false,
         };
     }
@@ -104,6 +128,10 @@ pub const Obj = struct {
         }
     }
 
+    fn as_obj_string_mut(self: *Obj) *ObjString {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     fn as_obj_string_const(self: *const Obj) *const ObjString {
         return @alignCast(@fieldParentPtr("obj", self));
     }
@@ -115,6 +143,7 @@ pub const ObjString = struct {
 
     // Used for allocating string literals onto the heap.
     pub fn cloneString(allocator: std.mem.Allocator, string_data: []const u8) !*ObjString {
+        // Defensively copy the data.
         const new_string_data = try allocator.dupe(u8, string_data);
 
         const ptr = try allocator.create(ObjString);

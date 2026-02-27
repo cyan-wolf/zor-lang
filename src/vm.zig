@@ -4,7 +4,9 @@ const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const CodeContent = chunk_mod.CodeContent;
 const OpCode = chunk_mod.OpCode;
-const Value = @import("value.zig").Value;
+const value_mod = @import("value.zig");
+const Value = value_mod.Value;
+const ObjString = value_mod.ObjString;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
@@ -101,6 +103,20 @@ pub const VM = struct {
         });
     }
 
+    pub fn concatenate(self: *VM) !void {
+        const b = self.pop().asString();
+        const a = self.pop().asString();
+
+        const concat_data: []const u8 = try std.mem.concat(self.allocator, u8, &[_][]const u8{ a.data, b.data });
+        // We free this memory in this function since the cloneString
+        // function will just copy the memory anyways. Not freeing here would
+        // lead to a memory leak.
+        defer self.allocator.free(concat_data);
+
+        const result = try ObjString.cloneString(self.allocator, concat_data);
+        try self.push(Value.fromString(result));
+    }
+
     fn run(self: *VM) !void {
         while (true) {
             if (DEBUG_TRACE_EXECUTION) {
@@ -148,7 +164,15 @@ pub const VM = struct {
                 },
                 .greater => try self.binaryOp(.greater),
                 .less => try self.binaryOp(.less),
-                .add => try self.binaryOp(.add),
+                .add => {
+                    if (self.peek(0).isString() and self.peek(1).isString()) {
+                        try self.concatenate();
+                    } else if (self.peek(0).isNumber() and self.peek(1).isNumber()) {
+                        try self.binaryOp(.add);
+                    } else {
+                        try self.reportRuntimeError("Operands must be two numbers or two strings.");
+                    }
+                },
                 .subtract => try self.binaryOp(.sub),
                 .multiply => try self.binaryOp(.mul),
                 .divide => try self.binaryOp(.div),
