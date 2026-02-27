@@ -4,7 +4,10 @@ const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const CodeContent = chunk_mod.CodeContent;
 const OpCode = chunk_mod.OpCode;
-const Value = chunk_mod.Value;
+const value_mod = @import("value.zig");
+const Value = value_mod.Value;
+const Obj = value_mod.Obj;
+const ObjString = value_mod.ObjString;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
@@ -16,10 +19,43 @@ pub const InterpretError = error{
     RuntimeError,
 };
 
+pub const AllocMonitor = struct {
+    objects: ?*Obj,
+    allocator: Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) AllocMonitor {
+        return .{
+            .objects = null,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn createObjString(self: *AllocMonitor, data: []const u8) !*ObjString {
+        const string = try ObjString.cloneString(self.allocator, data);
+        try self.registerAllocatedObj(string.as_obj());
+        return string;
+    }
+
+    fn registerAllocatedObj(self: *AllocMonitor, obj: *Obj) !void {
+        obj.next = self.objects;
+        self.objects = obj;
+    }
+
+    pub fn deinit(self: *AllocMonitor) void {
+        var curr = self.objects;
+
+        while (curr != null) {
+            defer curr.?.deinit(self.allocator);
+            curr = curr.?.next;
+        }
+    }
+};
+
 pub const VM = struct {
     chunk: ?*Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
+    alloc_monitor: AllocMonitor,
 
     allocator: Allocator,
     cli: Cli,
@@ -30,6 +66,7 @@ pub const VM = struct {
             .chunk = null,
             .ip = 0,
             .stack = .empty,
+            .alloc_monitor = AllocMonitor.init(allocator),
 
             .allocator = allocator,
             .cli = cli,
@@ -45,7 +82,7 @@ pub const VM = struct {
         self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator);
+        self.compiler = Compiler.init(source, self.allocator, self.alloc_monitor);
 
         const couldCompile = try self.compiler.?.compile(&chunk);
         if (!couldCompile) {
@@ -101,6 +138,20 @@ pub const VM = struct {
         });
     }
 
+    pub fn concatenate(self: *VM) !void {
+        const b = self.pop().asString();
+        const a = self.pop().asString();
+
+        const concat_data: []const u8 = try std.mem.concat(self.allocator, u8, &[_][]const u8{ a.data, b.data });
+        // We free this memory in this function since the cloneString
+        // function will just copy the memory anyways. Not freeing here would
+        // lead to a memory leak.
+        defer self.allocator.free(concat_data);
+
+        const string = try self.alloc_monitor.createObjString(concat_data);
+        try self.push(Value.fromObj(string.as_obj()));
+    }
+
     fn run(self: *VM) !void {
         while (true) {
             if (DEBUG_TRACE_EXECUTION) {
@@ -148,7 +199,15 @@ pub const VM = struct {
                 },
                 .greater => try self.binaryOp(.greater),
                 .less => try self.binaryOp(.less),
-                .add => try self.binaryOp(.add),
+                .add => {
+                    if (self.peek(0).isString() and self.peek(1).isString()) {
+                        try self.concatenate();
+                    } else if (self.peek(0).isNumber() and self.peek(1).isNumber()) {
+                        try self.binaryOp(.add);
+                    } else {
+                        try self.reportRuntimeError("Operands must be two numbers or two strings.");
+                    }
+                },
                 .subtract => try self.binaryOp(.sub),
                 .multiply => try self.binaryOp(.mul),
                 .divide => try self.binaryOp(.div),
@@ -191,6 +250,8 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM) void {
+        self.alloc_monitor.deinit();
+
         self.chunk = null;
         self.stack.deinit(self.allocator);
     }

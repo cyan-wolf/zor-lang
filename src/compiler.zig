@@ -4,13 +4,17 @@ const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const OpCode = chunk_mod.OpCode;
 const CodeContent = chunk_mod.CodeContent;
-const Value = chunk_mod.Value;
+const value_mod = @import("value.zig");
+const Value = value_mod.Value;
+const Obj = value_mod.Obj;
+const ObjString = value_mod.ObjString;
 const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precendence;
 const ParseRule = precedence_mod.ParseRule;
+const AllocMonitor = @import("vm.zig").AllocMonitor;
 
 const DEBUG_PRINT_CODE = true;
 
@@ -37,10 +41,11 @@ pub const Compiler = struct {
     complingChunk: *Chunk,
 
     allocator: std.mem.Allocator,
+    alloc_monitor: AllocMonitor,
 
     rules: std.enums.EnumArray(TokenKind, ParseRule),
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator) Compiler {
+    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: AllocMonitor) Compiler {
         return .{
             .source = source,
             .scanner = Scanner.init(source),
@@ -48,6 +53,7 @@ pub const Compiler = struct {
             .complingChunk = undefined,
 
             .allocator = alloctor,
+            .alloc_monitor = alloc_monitor,
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -70,7 +76,7 @@ pub const Compiler = struct {
                 .less = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .less_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .identifier = .{ .prefix = null, .infix = null, .precedence = .none },
-                .string = .{ .prefix = null, .infix = null, .precedence = .none },
+                .string = .{ .prefix = Compiler.string, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
                 .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -196,6 +202,13 @@ pub const Compiler = struct {
         try self.emitConstant(value);
     }
 
+    fn string(self: *Compiler) !void {
+        const string_data = self.parser.previous.text_ref[1 .. self.parser.previous.text_ref.len - 1];
+        const obj_string = try self.alloc_monitor.createObjString(string_data);
+
+        try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
+    }
+
     fn unary(self: *Compiler) !void {
         const prev_kind = self.parser.previous.kind;
 
@@ -219,7 +232,7 @@ pub const Compiler = struct {
             .bang_equal => try self.emitCodeAndOperand(.equal, @intFromEnum(OpCode.not)),
             .double_equal => try self.emitCode(.equal),
             .greater => try self.emitCode(.greater),
-            .greater_equal => try self.emitCodeAndOperand(.less, @intFromEnum(OpCode.not)), 
+            .greater_equal => try self.emitCodeAndOperand(.less, @intFromEnum(OpCode.not)),
             .less => try self.emitCode(.less),
             .less_equal => try self.emitCodeAndOperand(.greater, @intFromEnum(OpCode.not)),
             .plus => try self.emitCode(.add),
@@ -233,7 +246,7 @@ pub const Compiler = struct {
     fn literal(self: *Compiler) !void {
         const op_kind = self.parser.previous.kind;
 
-        switch(op_kind) {
+        switch (op_kind) {
             .k_false => try self.emitCode(.code_false),
             .k_nil => try self.emitCode(.nil),
             .k_true => try self.emitCode(.code_true),
