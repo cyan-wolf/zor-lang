@@ -19,11 +19,43 @@ pub const InterpretError = error{
     RuntimeError,
 };
 
+pub const AllocMonitor = struct {
+    objects: ?*Obj,
+    allocator: Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) AllocMonitor {
+        return .{
+            .objects = null,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn createObjString(self: *AllocMonitor, data: []const u8) !*ObjString {
+        const string = try ObjString.cloneString(self.allocator, data);
+        try self.registerAllocatedObj(string.as_obj());
+        return string;
+    }
+
+    fn registerAllocatedObj(self: *AllocMonitor, obj: *Obj) !void {
+        obj.next = self.objects;
+        self.objects = obj;
+    }
+
+    pub fn deinit(self: *AllocMonitor) void {
+        var curr = self.objects;
+
+        while (curr != null) {
+            defer curr.?.deinit(self.allocator);
+            curr = curr.?.next;
+        }
+    }
+};
+
 pub const VM = struct {
     chunk: ?*Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
-    objects: ?*Obj,
+    alloc_monitor: AllocMonitor,
 
     allocator: Allocator,
     cli: Cli,
@@ -34,7 +66,7 @@ pub const VM = struct {
             .chunk = null,
             .ip = 0,
             .stack = .empty,
-            .objects = null,
+            .alloc_monitor = AllocMonitor.init(allocator),
 
             .allocator = allocator,
             .cli = cli,
@@ -50,7 +82,7 @@ pub const VM = struct {
         self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator, self);
+        self.compiler = Compiler.init(source, self.allocator, self.alloc_monitor);
 
         const couldCompile = try self.compiler.?.compile(&chunk);
         if (!couldCompile) {
@@ -116,7 +148,7 @@ pub const VM = struct {
         // lead to a memory leak.
         defer self.allocator.free(concat_data);
 
-        const string = try self.createObjString(concat_data);
+        const string = try self.alloc_monitor.createObjString(concat_data);
         try self.push(Value.fromObj(string.as_obj()));
     }
 
@@ -205,17 +237,6 @@ pub const VM = struct {
         };
     }
 
-    pub fn createObjString(self: *VM, data: []const u8) !*ObjString {
-        const string = try ObjString.cloneString(self.allocator, data);
-        try self.registerAllocatedObj(string.as_obj());
-        return string;
-    }
-
-    fn registerAllocatedObj(self: *VM, obj: *Obj) !void {
-        obj.next = self.objects;
-        self.objects = obj;
-    }
-
     fn reportRuntimeError(self: *VM, message: []const u8) !void {
         const instructionIdx = self.ip;
         const line = self.chunk.?.lines.items[instructionIdx];
@@ -228,17 +249,8 @@ pub const VM = struct {
         return error.RuntimeError;
     }
 
-    fn freeObjects(self: *VM) void {
-        var curr = self.objects;
-
-        while (curr != null) {
-            defer curr.?.deinit(self.allocator);
-            curr = curr.?.next;
-        }
-    }
-
     pub fn deinit(self: *VM) void {
-        self.freeObjects();
+        self.alloc_monitor.deinit();
 
         self.chunk = null;
         self.stack.deinit(self.allocator);

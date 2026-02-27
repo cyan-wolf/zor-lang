@@ -14,7 +14,7 @@ const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precendence;
 const ParseRule = precedence_mod.ParseRule;
-const VM = @import("vm.zig").VM;
+const AllocMonitor = @import("vm.zig").AllocMonitor;
 
 const DEBUG_PRINT_CODE = true;
 
@@ -41,11 +41,11 @@ pub const Compiler = struct {
     complingChunk: *Chunk,
 
     allocator: std.mem.Allocator,
-    vm: *VM,
+    alloc_monitor: AllocMonitor,
 
     rules: std.enums.EnumArray(TokenKind, ParseRule),
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator, vm: *VM) Compiler {
+    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: AllocMonitor) Compiler {
         return .{
             .source = source,
             .scanner = Scanner.init(source),
@@ -53,7 +53,7 @@ pub const Compiler = struct {
             .complingChunk = undefined,
 
             .allocator = alloctor,
-            .vm = vm,
+            .alloc_monitor = alloc_monitor,
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -204,7 +204,7 @@ pub const Compiler = struct {
 
     fn string(self: *Compiler) !void {
         const string_data = self.parser.previous.text_ref[1 .. self.parser.previous.text_ref.len - 1];
-        const obj_string = try self.vm.createObjString(string_data);
+        const obj_string = try self.alloc_monitor.createObjString(string_data);
 
         try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
     }
