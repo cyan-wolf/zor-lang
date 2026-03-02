@@ -8,7 +8,9 @@ const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
-const StringPool = @import("table.zig").StringPool;
+const table_mod = @import("table.zig");
+const TableContext = table_mod.TableContext;
+const StringPool = table_mod.StringPool;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
@@ -22,20 +24,31 @@ pub const InterpretError = error{
 
 pub const AllocMonitor = struct {
     objects: ?*Obj,
-    strings: StringPool,
+    interned_strings: StringPool,
+    table_context: TableContext,
     allocator: Allocator,
 
     pub fn init(allocator: std.mem.Allocator) AllocMonitor {
         return .{
             .objects = null,
-            .strings = StringPool.init(allocator),
+            .interned_strings = StringPool.init(allocator),
+            .table_context = .{},
             .allocator = allocator,
         };
     }
 
-    pub fn createObjString(self: *AllocMonitor, data: []const u8) !*ObjString {
+    pub fn createOrGetInternedObjString(self: *AllocMonitor, data: []const u8) !*ObjString {
+        // If the string has already been interned, just returned the cached pointer.
+        if (self.interned_strings.getKeyAdapted(data, self.table_context)) |ptr| {
+            return ptr;
+        }
+        // Otherwise, allocate a new string out of the bytes in `data`.
         const string = try ObjString.cloneString(self.allocator, data);
         try self.registerAllocatedObj(string.as_obj());
+
+        // Mark the string as being interned.
+        try self.interned_strings.put(string, {});
+
         return string;
     }
 
@@ -51,7 +64,7 @@ pub const AllocMonitor = struct {
             defer curr.?.deinit(self.allocator);
             curr = curr.?.next;
         }
-        self.strings.deinit();
+        self.interned_strings.deinit();
     }
 };
 
@@ -152,7 +165,7 @@ pub const VM = struct {
         // lead to a memory leak.
         defer self.allocator.free(concat_data);
 
-        const string = try self.alloc_monitor.createObjString(concat_data);
+        const string = try self.alloc_monitor.createOrGetInternedObjString(concat_data);
         try self.push(Value.fromObj(string.as_obj()));
     }
 

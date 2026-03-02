@@ -7,27 +7,40 @@ pub fn hashString(string: []const u8) u64 {
     return std.hash.Wyhash.hash(0, string);
 }
 
-const TableContext = struct {
+pub const TableContext = struct {
     const Self = @This();
 
-    pub fn hash(self: Self, key: *ObjString) u64 {
+    pub fn hash(self: Self, key: anytype) u64 {
         _ = self;
-        return key.hash;
+
+        const T = @TypeOf(key);
+        if (T == *ObjString) {
+            return key.hash;
+        } else if (T == []const u8) {
+            return hashString(key);
+        } else {
+            @compileError("Unsupported hash type");
+        }
     }
 
-    pub fn eql(self: Self, a: *ObjString, b: *ObjString) bool {
+    pub fn eql(self: Self, a: anytype, b: anytype) bool {
         _ = self;
-        return a == b;
-    }
 
-    pub fn hashAdapted(self: Self, query: []const u8) u64 {
-        _ = self;
-        return hashString(query);
-    }
+        const TA = @TypeOf(a);
+        const TB = @TypeOf(b);
 
-    pub fn eqlAdapted(self: Self, query: []const u8, item: *ObjString) bool {
-        _ = self;
-        return hashString(query) == item.hash;
+        if (TA == *ObjString and TB == *ObjString) {
+            // Compare by pointer equality.
+            return a == b;
+        }
+        // If one of the arguments is a bare string ([]const u8) then
+        // we compare character-by-character with std.mem.eql.
+        else if (TA == []const u8 and TB == *ObjString) {
+            return std.mem.eql(u8, a, b.data);
+        } else if (TA == *ObjString and TB == []const u8) {
+            return std.mem.eql(u8, a.data, b);
+        }
+        return false;
     }
 };
 

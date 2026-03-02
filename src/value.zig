@@ -111,7 +111,10 @@ pub const Obj = struct {
                     const o1 = self.as_obj_string_const();
                     const o2 = other.as_obj_string_const();
 
-                    return std.mem.eql(u8, o1.data, o2.data);
+                    // All strings are interned, so we can just compare 
+                    // by pointer equality (==) instead of character-by-character 
+                    // (std.mem.eql).
+                    return o1 == o2;
                 },
             },
         }
