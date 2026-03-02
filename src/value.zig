@@ -1,4 +1,5 @@
 const std = @import("std");
+const hashString = @import("table.zig").hashString;
 
 pub const Value = union(enum) {
     number: f64,
@@ -147,6 +148,7 @@ pub const Obj = struct {
 pub const ObjString = struct {
     obj: Obj,
     data: []const u8,
+    hash: u64,
 
     // Used for allocating string literals onto the heap.
     pub fn cloneString(allocator: std.mem.Allocator, string_data: []const u8) !*ObjString {
@@ -160,6 +162,7 @@ pub const ObjString = struct {
                 .next = null,
             },
             .data = new_string_data,
+            .hash = hashString(new_string_data),
         };
 
         return ptr;

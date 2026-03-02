@@ -8,6 +8,7 @@ const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
+const StringPool = @import("table.zig").StringPool;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
@@ -21,11 +22,13 @@ pub const InterpretError = error{
 
 pub const AllocMonitor = struct {
     objects: ?*Obj,
+    strings: StringPool,
     allocator: Allocator,
 
     pub fn init(allocator: std.mem.Allocator) AllocMonitor {
         return .{
             .objects = null,
+            .strings = StringPool.init(allocator),
             .allocator = allocator,
         };
     }
@@ -48,6 +51,7 @@ pub const AllocMonitor = struct {
             defer curr.?.deinit(self.allocator);
             curr = curr.?.next;
         }
+        self.strings.deinit();
     }
 };
 
