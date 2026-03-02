@@ -204,7 +204,7 @@ pub const Compiler = struct {
 
     fn string(self: *Compiler) !void {
         const string_data = self.parser.previous.text_ref[1 .. self.parser.previous.text_ref.len - 1];
-        const obj_string = try self.alloc_monitor.createObjString(string_data);
+        const obj_string = try self.alloc_monitor.createOrGetInternedObjString(string_data);
 
         try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
     }
