@@ -105,8 +105,10 @@ pub const Compiler = struct {
         self.complingChunk = chunk;
 
         self.advance();
-        try self.expression();
-        self.consume(.eof, "End of expression.");
+        
+        while (!self.match(.eof)) {
+            try self.statement();
+        }
 
         try self.end();
         return !self.parser.had_error;
@@ -170,8 +172,32 @@ pub const Compiler = struct {
         self.markErrorAtCurrent(message);
     }
 
+    fn match(self: *Compiler, kind: TokenKind) bool {
+        if (!self.check(kind)) {
+            return false;
+        }
+        self.advance();
+        return true;
+    }
+
+    fn check(self: *Compiler, kind: TokenKind) bool {
+        return self.parser.current.kind == kind;
+    }
+
     fn expression(self: *Compiler) !void {
         try self.parseWithPrecendece(.assignment);
+    }
+
+    fn statement_print(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.semicolon, "Expected ';' after expression.");
+        try self.emitCode(.print);
+    }
+
+    fn statement(self: *Compiler) !void {
+        if (self.match(.k_print)) {
+            try self.statement_print();
+        }
     }
 
     fn emitByte(self: *Compiler, byte: CodeContent) !void {

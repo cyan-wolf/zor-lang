@@ -19,6 +19,7 @@ pub const OpCode = enum(u8) {
     multiply,
     divide,
     not,
+    print,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
@@ -118,6 +119,7 @@ pub const Chunk = struct {
             .multiply => std.debug.print("OP_MULTIPLY\n", .{}),
             .divide => std.debug.print("OP_DIVIDE\n", .{}),
             .not => std.debug.print("OP_NOT\n", .{}),
+            .print => std.debug.print("OP_PRINT\n ", .{}),
         }
 
         return offset + instruction.size();

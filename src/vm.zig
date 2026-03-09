@@ -191,6 +191,9 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
+                    // does nothing for now
+                },
+                .print => {
                     self.pop().show();
                     std.debug.print("\n", .{});
                     return;
