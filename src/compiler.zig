@@ -75,7 +75,7 @@ pub const Compiler = struct {
                 .greater_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .less = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .less_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
-                .identifier = .{ .prefix = null, .infix = null, .precedence = .none },
+                .identifier = .{ .prefix = Compiler.variable, .infix = null, .precedence = .none },
                 .string = .{ .prefix = Compiler.string, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
                 .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -105,7 +105,7 @@ pub const Compiler = struct {
         self.complingChunk = chunk;
 
         self.advance();
-        
+
         while (!self.match(.eof)) {
             try self.statement();
         }
@@ -194,10 +194,71 @@ pub const Compiler = struct {
         try self.emitCode(.print);
     }
 
+    fn statement_expression(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.semicolon, "Expected ';' after expression.");
+        try self.emitCode(.pop);
+    }
+
+    fn synchronize(self: *Compiler) void {
+        self.parser.in_panic_mode = false;
+
+        while (self.parser.current.kind != .eof) {
+            if (self.parser.previous.kind == .semicolon) {
+                return;
+            }
+
+            switch (self.parser.current.kind) {
+                .k_class, .k_fun, .k_var, .k_for, .k_if, .k_while, .k_print, .k_return => {
+                    return;
+                },
+                else => {},
+            }
+        }
+        self.advance();
+    }
+
     fn statement(self: *Compiler) !void {
+        if (self.match(.k_var)) {
+            try self.variable_declaration();
+            return;
+        }
+
         if (self.match(.k_print)) {
             try self.statement_print();
         }
+
+        if (self.parser.in_panic_mode) {
+            self.synchronize();
+        }
+    }
+
+    fn variable_declaration(self: *Compiler) !void {
+        const global_var_idx = try self.parseVariable("Expected variable name.");
+
+        if (self.match(.equal)) {
+            try self.expression();
+        }
+        else {
+            try self.emitCode(.nil);
+        }
+        self.consume(.semicolon, "Expected ';' after variable declaration.");
+
+        try self.defineVariable(global_var_idx);
+    }
+
+    fn parseVariable(self: *Compiler, error_message: []const u8) !usize {
+        self.consume(.identifier, error_message);
+        return try self.identifierConstant(self.parser.previous);
+    }
+
+    fn defineVariable(self: *Compiler, global_var_idx: usize) !void {
+        try self.emitCodeAndOperand(.define_global, @intCast(global_var_idx));
+    }
+
+    fn identifierConstant(self: *Compiler, name_source: Token) !usize {
+        const name = try ObjString.cloneString(self.allocator, name_source.text_ref);
+        return try self.makeConstant(Value.fromObj(name.as_obj()));
     }
 
     fn emitByte(self: *Compiler, byte: CodeContent) !void {
@@ -233,6 +294,15 @@ pub const Compiler = struct {
         const obj_string = try self.alloc_monitor.createOrGetInternedObjString(string_data);
 
         try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
+    }
+
+    fn variable(self: *Compiler) !void {
+        try self.namedVariable(self.parser.previous);
+    }
+
+    fn namedVariable(self: *Compiler, name: Token) !void {
+        const arg_idx = try self.identifierConstant(name);
+        try self.emitCodeAndOperand(.get_global, @intCast(arg_idx));
     }
 
     fn unary(self: *Compiler) !void {

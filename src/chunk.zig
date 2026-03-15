@@ -20,10 +20,13 @@ pub const OpCode = enum(u8) {
     divide,
     not,
     print,
+    pop,
+    define_global,
+    get_global,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .constant => 2,
+            .constant, .define_global, .get_global => 2,
             else => 1,
         };
     }
@@ -120,6 +123,9 @@ pub const Chunk = struct {
             .divide => std.debug.print("OP_DIVIDE\n", .{}),
             .not => std.debug.print("OP_NOT\n", .{}),
             .print => std.debug.print("OP_PRINT\n ", .{}),
+            .pop => std.debug.print("OP_POP\n ", .{}),
+            .define_global => std.debug.print("OP_DEFINE_GLOBAL\n", .{}),
+            .get_global => std.debug.print("OP_GET_GLOBAL\n", .{}),
         }
 
         return offset + instruction.size();

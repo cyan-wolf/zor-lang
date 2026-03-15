@@ -11,6 +11,7 @@ const ObjString = value_mod.ObjString;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
 const StringPool = table_mod.StringPool;
+const Table = table_mod.Table;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
@@ -25,6 +26,7 @@ pub const InterpretError = error{
 pub const AllocMonitor = struct {
     objects: ?*Obj,
     interned_strings: StringPool,
+    globals: Table,
     table_context: TableContext,
     allocator: Allocator,
 
@@ -32,6 +34,7 @@ pub const AllocMonitor = struct {
         return .{
             .objects = null,
             .interned_strings = StringPool.init(allocator),
+            .globals = Table.init(allocator),
             .table_context = .{},
             .allocator = allocator,
         };
@@ -65,6 +68,7 @@ pub const AllocMonitor = struct {
             curr = curr.?.next;
         }
         self.interned_strings.deinit();
+        self.globals.deinit();
     }
 };
 
@@ -232,6 +236,28 @@ pub const VM = struct {
                 .multiply => try self.binaryOp(.mul),
                 .divide => try self.binaryOp(.div),
                 .not => try self.push(Value.fromBoolean(self.pop().isFalsey())),
+                .pop => {
+                    // Value is delibrately ignored.
+                    _ = self.pop();
+                },
+                .define_global => {
+                    const name = self.readConstant().asString();
+
+                    // NOTE: The value is only popped from the VM stack AFTER it is added ot the
+                    // table. This is to avoid GC issues.
+                    try self.alloc_monitor.globals.put(name, self.peek(0));
+                    _ = self.pop();
+                },
+                .get_global => {
+                    const name = self.readConstant().asString();
+
+                    if (self.alloc_monitor.globals.get(name)) |value| {
+                        try self.push(value);
+                    } else {
+                        // TODO: Also put the name of the variable in the error message.
+                        try self.reportRuntimeError("Undefined variable.");
+                    }
+                },
             }
         }
     }
