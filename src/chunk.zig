@@ -23,10 +23,11 @@ pub const OpCode = enum(u8) {
     pop,
     define_global,
     get_global,
+    set_global,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .constant, .define_global, .get_global => 2,
+            .constant, .define_global, .get_global, .set_global => 2,
             else => 1,
         };
     }
@@ -126,6 +127,7 @@ pub const Chunk = struct {
             .pop => std.debug.print("OP_POP\n ", .{}),
             .define_global => std.debug.print("OP_DEFINE_GLOBAL\n", .{}),
             .get_global => std.debug.print("OP_GET_GLOBAL\n", .{}),
+            .set_global => std.debug.print("OP_SET_GLOBAL\n", .{}),
         }
 
         return offset + instruction.size();

@@ -196,6 +196,7 @@ pub const VM = struct {
             switch (instruction) {
                 .opreturn => {
                     // does nothing for now
+                    return;
                 },
                 .print => {
                     self.pop().show();
@@ -257,6 +258,15 @@ pub const VM = struct {
                         // TODO: Also put the name of the variable in the error message.
                         try self.reportRuntimeError("Undefined variable.");
                     }
+                },
+                .set_global => {
+                    const name = self.readConstant().asString();
+
+                    if (!self.alloc_monitor.globals.contains(name)) {
+                        // TODO: Also put the name of the variable in the error message.
+                        try self.reportRuntimeError("Undefined variable.");
+                    }
+                    try self.alloc_monitor.globals.put(name, self.peek(9));
                 },
             }
         }

@@ -27,7 +27,11 @@ const ParseFnError = error{
     InvalidCharacter,
 };
 
-pub const ParseFn = *const fn (*Compiler) ParseFnError!void;
+pub const ParseContext = struct {
+    can_assign: bool = false,
+};
+
+pub const ParseFn = *const fn (*Compiler, ParseContext) ParseFnError!void;
 
 pub const ParseRule = struct {
     prefix: ?ParseFn,
