@@ -10,6 +10,7 @@ const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
+const StringPoolContext = table_mod.StringPoolContext;
 const StringPool = table_mod.StringPool;
 const Table = table_mod.Table;
 
@@ -28,6 +29,7 @@ pub const AllocMonitor = struct {
     interned_strings: StringPool,
     globals: Table,
     table_context: TableContext,
+    string_pool_context: StringPoolContext,
     allocator: Allocator,
 
     pub fn init(allocator: std.mem.Allocator) AllocMonitor {
@@ -36,17 +38,18 @@ pub const AllocMonitor = struct {
             .interned_strings = StringPool.init(allocator),
             .globals = Table.init(allocator),
             .table_context = .{},
+            .string_pool_context = .{},
             .allocator = allocator,
         };
     }
 
     pub fn createOrGetInternedObjString(self: *AllocMonitor, data: []const u8) !*ObjString {
         // If the string has already been interned, just returned the cached pointer.
-        if (self.interned_strings.getKeyAdapted(data, self.table_context)) |ptr| {
+        if (self.interned_strings.getKeyAdapted(data, self.string_pool_context)) |ptr| {
             return ptr;
         }
         // Otherwise, allocate a new string out of the bytes in `data`.
-        const string = try ObjString.cloneString(self.allocator, data);
+        const string = try ObjString.cloneStringnUninterned(self.allocator, data);
         try self.registerAllocatedObj(string.as_obj());
 
         // Mark the string as being interned.
@@ -103,7 +106,7 @@ pub const VM = struct {
         self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator, self.alloc_monitor);
+        self.compiler = Compiler.init(source, self.allocator, &self.alloc_monitor);
 
         const couldCompile = try self.compiler.?.compile(&chunk);
         if (!couldCompile) {

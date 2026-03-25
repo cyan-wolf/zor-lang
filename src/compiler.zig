@@ -42,11 +42,11 @@ pub const Compiler = struct {
     complingChunk: *Chunk,
 
     allocator: std.mem.Allocator,
-    alloc_monitor: AllocMonitor,
+    alloc_monitor: *AllocMonitor,
 
     rules: std.enums.EnumArray(TokenKind, ParseRule),
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: AllocMonitor) Compiler {
+    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor) Compiler {
         return .{
             .source = source,
             .scanner = Scanner.init(source),
@@ -257,7 +257,7 @@ pub const Compiler = struct {
     }
 
     fn identifierConstant(self: *Compiler, name_source: Token) !usize {
-        const name = try ObjString.cloneString(self.allocator, name_source.text_ref);
+        const name = try self.alloc_monitor.createOrGetInternedObjString(name_source.text_ref);
         return try self.makeConstant(Value.fromObj(name.as_obj()));
     }
 

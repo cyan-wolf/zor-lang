@@ -56,7 +56,7 @@ pub const Chunk = struct {
     }
 
     pub fn getContent(self: *Chunk, offset: usize) CodeContent {
-        return self.code[offset];
+        return self.code.items[offset];
     }
 
     // Adds a constant to the chunk and returns the index where it was inserted.
