@@ -10,7 +10,9 @@ const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
+const StringPoolContext = table_mod.StringPoolContext;
 const StringPool = table_mod.StringPool;
+const Table = table_mod.Table;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
@@ -25,25 +27,29 @@ pub const InterpretError = error{
 pub const AllocMonitor = struct {
     objects: ?*Obj,
     interned_strings: StringPool,
+    globals: Table,
     table_context: TableContext,
+    string_pool_context: StringPoolContext,
     allocator: Allocator,
 
     pub fn init(allocator: std.mem.Allocator) AllocMonitor {
         return .{
             .objects = null,
             .interned_strings = StringPool.init(allocator),
+            .globals = Table.init(allocator),
             .table_context = .{},
+            .string_pool_context = .{},
             .allocator = allocator,
         };
     }
 
     pub fn createOrGetInternedObjString(self: *AllocMonitor, data: []const u8) !*ObjString {
         // If the string has already been interned, just returned the cached pointer.
-        if (self.interned_strings.getKeyAdapted(data, self.table_context)) |ptr| {
+        if (self.interned_strings.getKeyAdapted(data, self.string_pool_context)) |ptr| {
             return ptr;
         }
         // Otherwise, allocate a new string out of the bytes in `data`.
-        const string = try ObjString.cloneString(self.allocator, data);
+        const string = try ObjString.cloneStringnUninterned(self.allocator, data);
         try self.registerAllocatedObj(string.as_obj());
 
         // Mark the string as being interned.
@@ -65,6 +71,7 @@ pub const AllocMonitor = struct {
             curr = curr.?.next;
         }
         self.interned_strings.deinit();
+        self.globals.deinit();
     }
 };
 
@@ -99,7 +106,7 @@ pub const VM = struct {
         self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator, self.alloc_monitor);
+        self.compiler = Compiler.init(source, self.allocator, &self.alloc_monitor);
 
         const couldCompile = try self.compiler.?.compile(&chunk);
         if (!couldCompile) {
@@ -191,6 +198,10 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
+                    // does nothing for now
+                    return;
+                },
+                .print => {
                     self.pop().show();
                     std.debug.print("\n", .{});
                     return;
@@ -229,6 +240,37 @@ pub const VM = struct {
                 .multiply => try self.binaryOp(.mul),
                 .divide => try self.binaryOp(.div),
                 .not => try self.push(Value.fromBoolean(self.pop().isFalsey())),
+                .pop => {
+                    // Value is delibrately ignored.
+                    _ = self.pop();
+                },
+                .define_global => {
+                    const name = self.readConstant().asString();
+
+                    // NOTE: The value is only popped from the VM stack AFTER it is added ot the
+                    // table. This is to avoid GC issues.
+                    try self.alloc_monitor.globals.put(name, self.peek(0));
+                    _ = self.pop();
+                },
+                .get_global => {
+                    const name = self.readConstant().asString();
+
+                    if (self.alloc_monitor.globals.get(name)) |value| {
+                        try self.push(value);
+                    } else {
+                        // TODO: Also put the name of the variable in the error message.
+                        try self.reportRuntimeError("Undefined variable.");
+                    }
+                },
+                .set_global => {
+                    const name = self.readConstant().asString();
+
+                    if (!self.alloc_monitor.globals.contains(name)) {
+                        // TODO: Also put the name of the variable in the error message.
+                        try self.reportRuntimeError("Undefined variable.");
+                    }
+                    try self.alloc_monitor.globals.put(name, self.peek(9));
+                },
             }
         }
     }

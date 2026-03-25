@@ -13,6 +13,7 @@ const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precendence;
+const Parsecontext = precedence_mod.ParseContext;
 const ParseRule = precedence_mod.ParseRule;
 const AllocMonitor = @import("vm.zig").AllocMonitor;
 
@@ -41,11 +42,11 @@ pub const Compiler = struct {
     complingChunk: *Chunk,
 
     allocator: std.mem.Allocator,
-    alloc_monitor: AllocMonitor,
+    alloc_monitor: *AllocMonitor,
 
     rules: std.enums.EnumArray(TokenKind, ParseRule),
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: AllocMonitor) Compiler {
+    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor) Compiler {
         return .{
             .source = source,
             .scanner = Scanner.init(source),
@@ -75,7 +76,7 @@ pub const Compiler = struct {
                 .greater_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .less = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
                 .less_equal = .{ .prefix = null, .infix = Compiler.binary, .precedence = .comparison },
-                .identifier = .{ .prefix = null, .infix = null, .precedence = .none },
+                .identifier = .{ .prefix = Compiler.variable, .infix = null, .precedence = .none },
                 .string = .{ .prefix = Compiler.string, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
                 .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -105,8 +106,10 @@ pub const Compiler = struct {
         self.complingChunk = chunk;
 
         self.advance();
-        try self.expression();
-        self.consume(.eof, "End of expression.");
+
+        while (!self.match(.eof)) {
+            try self.statement();
+        }
 
         try self.end();
         return !self.parser.had_error;
@@ -170,8 +173,92 @@ pub const Compiler = struct {
         self.markErrorAtCurrent(message);
     }
 
+    fn match(self: *Compiler, kind: TokenKind) bool {
+        if (!self.check(kind)) {
+            return false;
+        }
+        self.advance();
+        return true;
+    }
+
+    fn check(self: *Compiler, kind: TokenKind) bool {
+        return self.parser.current.kind == kind;
+    }
+
     fn expression(self: *Compiler) !void {
         try self.parseWithPrecendece(.assignment);
+    }
+
+    fn statement_print(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.semicolon, "Expected ';' after expression.");
+        try self.emitCode(.print);
+    }
+
+    fn statement_expression(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.semicolon, "Expected ';' after expression.");
+        try self.emitCode(.pop);
+    }
+
+    fn synchronize(self: *Compiler) void {
+        self.parser.in_panic_mode = false;
+
+        while (self.parser.current.kind != .eof) {
+            if (self.parser.previous.kind == .semicolon) {
+                return;
+            }
+
+            switch (self.parser.current.kind) {
+                .k_class, .k_fun, .k_var, .k_for, .k_if, .k_while, .k_print, .k_return => {
+                    return;
+                },
+                else => {},
+            }
+        }
+        self.advance();
+    }
+
+    fn statement(self: *Compiler) !void {
+        if (self.match(.k_var)) {
+            try self.variable_declaration();
+            return;
+        }
+
+        if (self.match(.k_print)) {
+            try self.statement_print();
+        }
+
+        if (self.parser.in_panic_mode) {
+            self.synchronize();
+        }
+    }
+
+    fn variable_declaration(self: *Compiler) !void {
+        const global_var_idx = try self.parseVariable("Expected variable name.");
+
+        if (self.match(.equal)) {
+            try self.expression();
+        } else {
+            try self.emitCode(.nil);
+        }
+        self.consume(.semicolon, "Expected ';' after variable declaration.");
+
+        try self.defineVariable(global_var_idx);
+    }
+
+    fn parseVariable(self: *Compiler, error_message: []const u8) !usize {
+        self.consume(.identifier, error_message);
+        return try self.identifierConstant(self.parser.previous);
+    }
+
+    fn defineVariable(self: *Compiler, global_var_idx: usize) !void {
+        try self.emitCodeAndOperand(.define_global, @intCast(global_var_idx));
+    }
+
+    fn identifierConstant(self: *Compiler, name_source: Token) !usize {
+        const name = try self.alloc_monitor.createOrGetInternedObjString(name_source.text_ref);
+        return try self.makeConstant(Value.fromObj(name.as_obj()));
     }
 
     fn emitByte(self: *Compiler, byte: CodeContent) !void {
@@ -197,19 +284,34 @@ pub const Compiler = struct {
         }
     }
 
-    fn number(self: *Compiler) !void {
+    fn number(self: *Compiler, _: Parsecontext) !void {
         const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
     }
 
-    fn string(self: *Compiler) !void {
+    fn string(self: *Compiler, _: Parsecontext) !void {
         const string_data = self.parser.previous.text_ref[1 .. self.parser.previous.text_ref.len - 1];
         const obj_string = try self.alloc_monitor.createOrGetInternedObjString(string_data);
 
         try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
     }
 
-    fn unary(self: *Compiler) !void {
+    fn variable(self: *Compiler, ctx: Parsecontext) !void {
+        try self.namedVariable(self.parser.previous, ctx);
+    }
+
+    fn namedVariable(self: *Compiler, name: Token, ctx: Parsecontext) !void {
+        const arg_idx = try self.identifierConstant(name);
+
+        if (ctx.can_assign and self.match(.equal)) {
+            try self.expression();
+            try self.emitCodeAndOperand(.set_global, @intCast(arg_idx));
+        } else {
+            try self.emitCodeAndOperand(.get_global, @intCast(arg_idx));
+        }
+    }
+
+    fn unary(self: *Compiler, _: Parsecontext) !void {
         const prev_kind = self.parser.previous.kind;
 
         // Compile the operand of the unary expression.
@@ -222,7 +324,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(self: *Compiler) !void {
+    fn binary(self: *Compiler, _: Parsecontext) !void {
         const op_kind = self.parser.previous.kind;
         const rule = self.getRule(op_kind);
 
@@ -243,7 +345,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn literal(self: *Compiler) !void {
+    fn literal(self: *Compiler, _: Parsecontext) !void {
         const op_kind = self.parser.previous.kind;
 
         switch (op_kind) {
@@ -263,18 +365,23 @@ pub const Compiler = struct {
             self.markError("Expect expression");
             return;
         }
-        try prefix_rule.?(self);
+        const can_assign = precendence.hasLessOrEqBindingPowerThan(.assignment);
+        try prefix_rule.?(self, .{ .can_assign = can_assign });
 
         while (precendence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.current.kind).precedence)) {
             self.advance();
 
             const infix_rule = self.getRule(self.parser.previous.kind).infix;
 
-            try infix_rule.?(self);
+            try infix_rule.?(self, .{ .can_assign = can_assign });
+        }
+
+        if (can_assign and self.match(.equal)) {
+            self.markError("Invalid assignment target.");
         }
     }
 
-    fn grouping(self: *Compiler) !void {
+    fn grouping(self: *Compiler, _: Parsecontext) !void {
         try self.expression();
         self.consume(.right_paren, "Expect ')' after expression.");
     }

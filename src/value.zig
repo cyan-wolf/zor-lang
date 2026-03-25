@@ -111,8 +111,8 @@ pub const Obj = struct {
                     const o1 = self.as_obj_string_const();
                     const o2 = other.as_obj_string_const();
 
-                    // All strings are interned, so we can just compare 
-                    // by pointer equality (==) instead of character-by-character 
+                    // All strings are interned, so we can just compare
+                    // by pointer equality (==) instead of character-by-character
                     // (std.mem.eql).
                     return o1 == o2;
                 },
@@ -154,7 +154,9 @@ pub const ObjString = struct {
     hash: u64,
 
     // Used for allocating string literals onto the heap.
-    pub fn cloneString(allocator: std.mem.Allocator, string_data: []const u8) !*ObjString {
+    // WARNING: Do not use this method directly as it creates uninterned strings.
+    // Instead create interned strings using the Allocation Monitor type on the VM.
+    pub fn cloneStringnUninterned(allocator: std.mem.Allocator, string_data: []const u8) !*ObjString {
         // Defensively copy the data.
         const new_string_data = try allocator.dupe(u8, string_data);
 

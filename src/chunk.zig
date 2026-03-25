@@ -19,10 +19,15 @@ pub const OpCode = enum(u8) {
     multiply,
     divide,
     not,
+    print,
+    pop,
+    define_global,
+    get_global,
+    set_global,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .constant => 2,
+            .constant, .define_global, .get_global, .set_global => 2,
             else => 1,
         };
     }
@@ -51,7 +56,7 @@ pub const Chunk = struct {
     }
 
     pub fn getContent(self: *Chunk, offset: usize) CodeContent {
-        return self.code[offset];
+        return self.code.items[offset];
     }
 
     // Adds a constant to the chunk and returns the index where it was inserted.
@@ -93,31 +98,18 @@ pub const Chunk = struct {
         // an op code.
         const instruction: OpCode = @enumFromInt(self.code.items[offset]);
 
-        switch (instruction) {
-            .opreturn => std.debug.print("OP_RETURN\n", .{}),
-            .constant => {
-                const constIdx: usize = @intCast(self.code.items[offset + 1]);
-                std.debug.print("OP_CONSTANT {d:4} '", .{constIdx});
+        if (instruction.size() == 2) {
+            const constIdx: usize = @intCast(self.code.items[offset + 1]);
+            std.debug.print("op_{s} {d:4} '", .{ @tagName(instruction), constIdx });
 
-                const value = self.constants.items[constIdx];
+            const value = self.constants.items[constIdx];
 
-                // Print the value.
-                value.show();
+            // Print the value.
+            value.show();
 
-                std.debug.print("'\n", .{});
-            },
-            .nil => std.debug.print("OP_NIL\n", .{}),
-            .code_true => std.debug.print("OP_TRUE\n", .{}),
-            .code_false => std.debug.print("OP_FALSE\n", .{}),
-            .negate => std.debug.print("OP_NEGATE\n", .{}),
-            .equal => std.debug.print("OP_EQUAL\n", .{}),
-            .greater => std.debug.print("OP_GREATER\n", .{}),
-            .less => std.debug.print("OP_LESS\n", .{}),
-            .add => std.debug.print("OP_ADD\n", .{}),
-            .subtract => std.debug.print("OP_SUBTRACT\n", .{}),
-            .multiply => std.debug.print("OP_MULTIPLY\n", .{}),
-            .divide => std.debug.print("OP_DIVIDE\n", .{}),
-            .not => std.debug.print("OP_NOT\n", .{}),
+            std.debug.print("'\n", .{});
+        } else {
+            std.debug.print("op_{s}\n", .{@tagName(instruction)});
         }
 
         return offset + instruction.size();
