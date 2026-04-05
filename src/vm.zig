@@ -313,5 +313,7 @@ pub const VM = struct {
 
         self.chunk = null;
         self.stack.deinit(self.allocator);
+
+        self.compiler.?.deinit();
     }
 };

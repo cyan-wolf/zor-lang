@@ -16,6 +16,7 @@ const Precendence = precedence_mod.Precendence;
 const Parsecontext = precedence_mod.ParseContext;
 const ParseRule = precedence_mod.ParseRule;
 const AllocMonitor = @import("vm.zig").AllocMonitor;
+const LocalsInfo = @import("locals.zig").LocalsInfo;
 
 const DEBUG_PRINT_CODE = true;
 
@@ -41,10 +42,12 @@ pub const Compiler = struct {
     parser: Parser,
     complingChunk: *Chunk,
 
+    rules: std.enums.EnumArray(TokenKind, ParseRule),
+
+    locals_info: LocalsInfo,
+
     allocator: std.mem.Allocator,
     alloc_monitor: *AllocMonitor,
-
-    rules: std.enums.EnumArray(TokenKind, ParseRule),
 
     pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor) Compiler {
         return .{
@@ -53,8 +56,7 @@ pub const Compiler = struct {
             .parser = Parser.init(),
             .complingChunk = undefined,
 
-            .allocator = alloctor,
-            .alloc_monitor = alloc_monitor,
+            .locals_info = .{},
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -99,6 +101,9 @@ pub const Compiler = struct {
                 .eof = .{ .prefix = null, .infix = null, .precedence = .none },
                 .none = .{ .prefix = null, .infix = null, .precedence = .none },
             }),
+
+            .allocator = alloctor,
+            .alloc_monitor = alloc_monitor,
         };
     }
 
@@ -189,6 +194,17 @@ pub const Compiler = struct {
         try self.parseWithPrecendece(.assignment);
     }
 
+    // This has an explicit error set in the function definition
+    // because block(...) <-> statement(...) have a recursive relationship,
+    // which breaks Zig's error set inference.
+    fn block(self: *Compiler) error{ OutOfMemory, InvalidCharacter }!void {
+        while (!self.check(.right_brace) and !self.check(.eof)) {
+            try self.statement();
+        }
+
+        self.consume(.right_brace, "Expected '}' after block.");
+    }
+
     fn statement_print(self: *Compiler) !void {
         try self.expression();
         self.consume(.semicolon, "Expected ';' after expression.");
@@ -227,6 +243,10 @@ pub const Compiler = struct {
 
         if (self.match(.k_print)) {
             try self.statement_print();
+        } else if (self.match(.left_brace)) {
+            try self.beginScope();
+            try self.block();
+            try self.endScope();
         }
 
         if (self.parser.in_panic_mode) {
@@ -252,7 +272,32 @@ pub const Compiler = struct {
         return try self.identifierConstant(self.parser.previous);
     }
 
+    fn declareVariable(self: *Compiler) !void {
+        // If the scope depth is zero, then this is a global variable.
+        // Global variables are late bound and hence have different logic
+        // for declaring them/
+        if (self.locals_info.scope_depth == 0) {
+            return;
+        }
+        const name = self.parser.previous;
+        self.addLocal(name);
+    }
+
+    fn addLocal(self: *Compiler, name: Token) !void {
+        self.locals_info.locals.append(self.allocator, .{
+            .name = name,
+            .depth = self.locals_info.scope_depth,
+        });
+    }
+
     fn defineVariable(self: *Compiler, global_var_idx: usize) !void {
+        // If the scope depth is greater than zero, then we are defining a
+        // local variable. In that case we exit the function the function early
+        // before we emit the code used for definining a global variable.
+        if (self.locals_info.scope_depth > 0) {
+            return;
+        }
+
         try self.emitCodeAndOperand(.define_global, @intCast(global_var_idx));
     }
 
@@ -272,6 +317,14 @@ pub const Compiler = struct {
     fn emitCodeAndOperand(self: *Compiler, code: OpCode, operand: CodeContent) !void {
         try self.emitCode(code);
         try self.emitByte(operand);
+    }
+
+    fn beginScope(self: *Compiler) !void {
+        self.locals_info.scope_depth += 1;
+    }
+
+    fn endScope(self: *Compiler) !void {
+        self.locals_info.scope_depth -= 1;
     }
 
     fn end(self: *Compiler) !void {
@@ -402,5 +455,9 @@ pub const Compiler = struct {
             return 0;
         }
         return @intCast(constIdx);
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        self.locals_info.deinit(self.allocator);
     }
 };
