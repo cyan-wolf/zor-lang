@@ -270,7 +270,7 @@ pub const VM = struct {
                         // TODO: Also put the name of the variable in the error message.
                         try self.reportRuntimeError("Undefined variable.");
                     }
-                    try self.alloc_monitor.globals.put(name, self.peek(9));
+                    try self.alloc_monitor.globals.put(name, self.peek(0));
                 },
                 .get_local => {
                     const slot = self.readByte();
