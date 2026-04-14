@@ -287,7 +287,16 @@ pub const VM = struct {
     pub fn repl(self: *VM) !void {
         while (true) {
             const line = try self.cli.input("> ");
-            try self.interpret(line);
+
+            self.interpret(line) catch |err| switch (err) {
+                error.CompileError => {
+                    std.debug.print("[!] Compile Error Detected\n", .{});
+                },
+                error.RuntimeError => {
+                    std.debug.print("[!] Runtime Error Detected\n", .{});
+                },
+                else => return err,
+            };
         }
     }
 

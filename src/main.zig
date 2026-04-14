@@ -31,11 +31,9 @@ pub fn main() !void {
 
     if (args.len == 1) {
         try vm.repl();
-    }
-    else if (args.len == 2) {
+    } else if (args.len == 2) {
         try vm.runFile(args[1]);
-    }
-    else {
+    } else {
         std.debug.print("Usage: zor [path]\n", .{});
         std.process.exit(64);
     }
