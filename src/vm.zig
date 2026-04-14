@@ -202,7 +202,8 @@ pub const VM = struct {
                     return;
                 },
                 .print => {
-                    self.pop().show();
+                    // Use the pretty-print representation.
+                    self.pop().show_pretty();
                     std.debug.print("\n", .{});
                     return;
                 },
