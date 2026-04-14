@@ -3,7 +3,7 @@ const Token = @import("token.zig").Token;
 
 pub const Local = struct {
     name: Token,
-    depth: usize,
+    depth: ?usize,
 };
 
 pub const LocalsInfo = struct {

@@ -20,6 +20,11 @@ const LocalsInfo = @import("locals.zig").LocalsInfo;
 
 const DEBUG_PRINT_CODE = true;
 
+const OpPair = struct {
+    get: OpCode,
+    set: OpCode,
+};
+
 pub const Parser = struct {
     current: Token,
     previous: Token,
@@ -237,7 +242,7 @@ pub const Compiler = struct {
 
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
-            try self.variable_declaration();
+            try self.variableDeclaration();
             return;
         }
 
@@ -254,7 +259,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn variable_declaration(self: *Compiler) !void {
+    fn variableDeclaration(self: *Compiler) !void {
         const global_var_idx = try self.parseVariable("Expected variable name.");
 
         if (self.match(.equal)) {
@@ -269,6 +274,13 @@ pub const Compiler = struct {
 
     fn parseVariable(self: *Compiler, error_message: []const u8) !usize {
         self.consume(.identifier, error_message);
+
+        try self.declareVariable();
+
+        if (self.locals_info.scope_depth > 0) {
+            return 0;
+        }
+
         return try self.identifierConstant(self.parser.previous);
     }
 
@@ -280,13 +292,14 @@ pub const Compiler = struct {
             return;
         }
         const name = self.parser.previous;
-        self.addLocal(name);
+        try self.addLocal(name);
     }
 
     fn addLocal(self: *Compiler, name: Token) !void {
-        self.locals_info.locals.append(self.allocator, .{
+        try self.locals_info.locals.append(self.allocator, .{
             .name = name,
-            .depth = self.locals_info.scope_depth,
+            // null represents uninitialized
+            .depth = null,
         });
     }
 
@@ -295,10 +308,17 @@ pub const Compiler = struct {
         // local variable. In that case we exit the function the function early
         // before we emit the code used for definining a global variable.
         if (self.locals_info.scope_depth > 0) {
+            self.markInitialized();
             return;
         }
 
         try self.emitCodeAndOperand(.define_global, @intCast(global_var_idx));
+    }
+
+    fn markInitialized(self: *Compiler) void {
+        // Locals start out with their scope set to `null` meaning it is uninitialized.
+        // Setting the depth to the current scope depth signals that the local is ready.
+        self.locals_info.locals.items[self.locals_info.locals.items.len - 1].depth = self.locals_info.scope_depth;
     }
 
     fn identifierConstant(self: *Compiler, name_source: Token) !usize {
@@ -325,6 +345,18 @@ pub const Compiler = struct {
 
     fn endScope(self: *Compiler) !void {
         self.locals_info.scope_depth -= 1;
+
+        // Walk backwards through the local variable array and discard them.
+        while (self.locals_info.locals.items.len > 0) {
+            const next_local = self.locals_info.locals.getLast();
+
+            if (next_local.depth != null and next_local.depth.? > self.locals_info.scope_depth) {
+                try self.emitCode(.pop);
+                _ = self.locals_info.locals.pop();
+            } else {
+                break;
+            }
+        }
     }
 
     fn end(self: *Compiler) !void {
@@ -354,14 +386,43 @@ pub const Compiler = struct {
     }
 
     fn namedVariable(self: *Compiler, name: Token, ctx: Parsecontext) !void {
-        const arg_idx = try self.identifierConstant(name);
+        var arg_idx = self.resolveLocal(name);
+
+        const result: OpPair = if (arg_idx != null) blk: {
+            break :blk .{ .get = .get_local, .set = .set_local };
+        } else blk: {
+            arg_idx = try self.identifierConstant(name);
+            break :blk .{ .get = .get_global, .set = .set_global };
+        };
 
         if (ctx.can_assign and self.match(.equal)) {
             try self.expression();
-            try self.emitCodeAndOperand(.set_global, @intCast(arg_idx));
+            try self.emitCodeAndOperand(result.set, @intCast(arg_idx.?));
         } else {
-            try self.emitCodeAndOperand(.get_global, @intCast(arg_idx));
+            try self.emitCodeAndOperand(result.get, @intCast(arg_idx.?));
         }
+    }
+
+    fn resolveLocal(self: *Compiler, name: Token) ?usize {
+        var i: usize = self.locals_info.locals.items.len;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals_info.locals.items[i];
+
+            // Return the local's index if the requested name matches.
+            // We need to compare the strings by value since these are pointers into
+            // the original source string, rather than interned strings that we can
+            // compare by pointer.
+            if (std.mem.eql(u8, name.text_ref, local.name.text_ref)) {
+                if (local.depth == null) {
+                    self.markError("Cannot ready local variable in its own initialzer.");
+                    // Should we return here?
+                }
+
+                return i;
+            }
+        }
+        return null;
     }
 
     fn unary(self: *Compiler, _: Parsecontext) !void {

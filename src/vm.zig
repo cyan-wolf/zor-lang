@@ -271,6 +271,14 @@ pub const VM = struct {
                     }
                     try self.alloc_monitor.globals.put(name, self.peek(9));
                 },
+                .get_local => {
+                    const slot = self.readByte();
+                    try self.push(self.stack.items[slot]);
+                },
+                .set_local => {
+                    const slot = self.readByte();
+                    self.stack.items[slot] = self.peek(0);
+                },
             }
         }
     }
