@@ -24,10 +24,12 @@ pub const OpCode = enum(u8) {
     define_global,
     get_global,
     set_global,
+    get_local,
+    set_local,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .constant, .define_global, .get_global, .set_global => 2,
+            .constant, .define_global, .get_global, .set_global, .get_local, .set_local => 2,
             else => 1,
         };
     }

@@ -62,7 +62,7 @@ pub const Scanner = struct {
             '<' => self.makeToken(if (self.match('=')) .less_equal else .less),
             '>' => self.makeToken(if (self.match('=')) .greater_equal else .greater),
             '"' => self.scanStringLiteral(),
-            else => @panic("unknown character"),
+            else => self.makeErrToken("unknown character"),
         };
     }
 

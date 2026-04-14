@@ -94,6 +94,15 @@ pub const Value = union(enum) {
             .obj => |o| o.show(),
         }
     }
+
+    // Used by, for example, `print`.
+    // Currently only strings have a different pretty print representation.
+    pub fn show_pretty(self: Value) void {
+        switch (self) {
+            .obj => |o| o.show_pretty(),
+            else => self.show(),
+        }
+    }
 };
 
 pub const ObjKind = enum {
@@ -125,6 +134,16 @@ pub const Obj = struct {
             .string => {
                 const obj_string = self.as_obj_string_const();
                 std.debug.print("[object string '{s}']", .{obj_string.data});
+            },
+        }
+    }
+
+    // Representation in `print` (for example).
+    pub fn show_pretty(self: *const Obj) void {
+        switch (self.kind) {
+            .string => {
+                const obj_string = self.as_obj_string_const();
+                std.debug.print("{s}", .{obj_string.data});
             },
         }
     }

@@ -12,12 +12,18 @@ const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
-const Precendence = precedence_mod.Precendence;
+const Precendence = precedence_mod.Precedence;
 const Parsecontext = precedence_mod.ParseContext;
 const ParseRule = precedence_mod.ParseRule;
 const AllocMonitor = @import("vm.zig").AllocMonitor;
+const LocalsInfo = @import("locals.zig").LocalsInfo;
 
 const DEBUG_PRINT_CODE = true;
+
+const OpPair = struct {
+    get: OpCode,
+    set: OpCode,
+};
 
 pub const Parser = struct {
     current: Token,
@@ -41,10 +47,12 @@ pub const Compiler = struct {
     parser: Parser,
     complingChunk: *Chunk,
 
+    rules: std.enums.EnumArray(TokenKind, ParseRule),
+
+    locals_info: LocalsInfo,
+
     allocator: std.mem.Allocator,
     alloc_monitor: *AllocMonitor,
-
-    rules: std.enums.EnumArray(TokenKind, ParseRule),
 
     pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor) Compiler {
         return .{
@@ -53,8 +61,7 @@ pub const Compiler = struct {
             .parser = Parser.init(),
             .complingChunk = undefined,
 
-            .allocator = alloctor,
-            .alloc_monitor = alloc_monitor,
+            .locals_info = .{},
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -99,6 +106,9 @@ pub const Compiler = struct {
                 .eof = .{ .prefix = null, .infix = null, .precedence = .none },
                 .none = .{ .prefix = null, .infix = null, .precedence = .none },
             }),
+
+            .allocator = alloctor,
+            .alloc_monitor = alloc_monitor,
         };
     }
 
@@ -186,7 +196,18 @@ pub const Compiler = struct {
     }
 
     fn expression(self: *Compiler) !void {
-        try self.parseWithPrecendece(.assignment);
+        try self.parseWithPrecedence(.assignment);
+    }
+
+    // This has an explicit error set in the function definition
+    // because block(...) <-> statement(...) have a recursive relationship,
+    // which breaks Zig's error set inference.
+    fn block(self: *Compiler) error{ OutOfMemory, InvalidCharacter }!void {
+        while (!self.check(.right_brace) and !self.check(.eof)) {
+            try self.statement();
+        }
+
+        self.consume(.right_brace, "Expected '}' after block.");
     }
 
     fn statement_print(self: *Compiler) !void {
@@ -221,12 +242,18 @@ pub const Compiler = struct {
 
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
-            try self.variable_declaration();
+            try self.variableDeclaration();
             return;
         }
 
         if (self.match(.k_print)) {
             try self.statement_print();
+        } else if (self.match(.left_brace)) {
+            try self.beginScope();
+            try self.block();
+            try self.endScope();
+        } else {
+            try self.expressionStatement();
         }
 
         if (self.parser.in_panic_mode) {
@@ -234,7 +261,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn variable_declaration(self: *Compiler) !void {
+    fn variableDeclaration(self: *Compiler) !void {
         const global_var_idx = try self.parseVariable("Expected variable name.");
 
         if (self.match(.equal)) {
@@ -247,13 +274,59 @@ pub const Compiler = struct {
         try self.defineVariable(global_var_idx);
     }
 
+    fn expressionStatement(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.semicolon, "Expected ';' after expression.");
+        try self.emitCode(.pop);
+    }
+
     fn parseVariable(self: *Compiler, error_message: []const u8) !usize {
         self.consume(.identifier, error_message);
+
+        try self.declareVariable();
+
+        if (self.locals_info.scope_depth > 0) {
+            return 0;
+        }
+
         return try self.identifierConstant(self.parser.previous);
     }
 
+    fn declareVariable(self: *Compiler) !void {
+        // If the scope depth is zero, then this is a global variable.
+        // Global variables are late bound and hence have different logic
+        // for declaring them/
+        if (self.locals_info.scope_depth == 0) {
+            return;
+        }
+        const name = self.parser.previous;
+        try self.addLocal(name);
+    }
+
+    fn addLocal(self: *Compiler, name: Token) !void {
+        try self.locals_info.locals.append(self.allocator, .{
+            .name = name,
+            // null represents uninitialized
+            .depth = null,
+        });
+    }
+
     fn defineVariable(self: *Compiler, global_var_idx: usize) !void {
+        // If the scope depth is greater than zero, then we are defining a
+        // local variable. In that case we exit the function the function early
+        // before we emit the code used for definining a global variable.
+        if (self.locals_info.scope_depth > 0) {
+            self.markInitialized();
+            return;
+        }
+
         try self.emitCodeAndOperand(.define_global, @intCast(global_var_idx));
+    }
+
+    fn markInitialized(self: *Compiler) void {
+        // Locals start out with their scope set to `null` meaning it is uninitialized.
+        // Setting the depth to the current scope depth signals that the local is ready.
+        self.locals_info.locals.items[self.locals_info.locals.items.len - 1].depth = self.locals_info.scope_depth;
     }
 
     fn identifierConstant(self: *Compiler, name_source: Token) !usize {
@@ -272,6 +345,26 @@ pub const Compiler = struct {
     fn emitCodeAndOperand(self: *Compiler, code: OpCode, operand: CodeContent) !void {
         try self.emitCode(code);
         try self.emitByte(operand);
+    }
+
+    fn beginScope(self: *Compiler) !void {
+        self.locals_info.scope_depth += 1;
+    }
+
+    fn endScope(self: *Compiler) !void {
+        self.locals_info.scope_depth -= 1;
+
+        // Walk backwards through the local variable array and discard them.
+        while (self.locals_info.locals.items.len > 0) {
+            const next_local = self.locals_info.locals.getLast();
+
+            if (next_local.depth != null and next_local.depth.? > self.locals_info.scope_depth) {
+                try self.emitCode(.pop);
+                _ = self.locals_info.locals.pop();
+            } else {
+                break;
+            }
+        }
     }
 
     fn end(self: *Compiler) !void {
@@ -301,21 +394,50 @@ pub const Compiler = struct {
     }
 
     fn namedVariable(self: *Compiler, name: Token, ctx: Parsecontext) !void {
-        const arg_idx = try self.identifierConstant(name);
+        var arg_idx = self.resolveLocal(name);
+
+        const result: OpPair = if (arg_idx != null) blk: {
+            break :blk .{ .get = .get_local, .set = .set_local };
+        } else blk: {
+            arg_idx = try self.identifierConstant(name);
+            break :blk .{ .get = .get_global, .set = .set_global };
+        };
 
         if (ctx.can_assign and self.match(.equal)) {
             try self.expression();
-            try self.emitCodeAndOperand(.set_global, @intCast(arg_idx));
+            try self.emitCodeAndOperand(result.set, @intCast(arg_idx.?));
         } else {
-            try self.emitCodeAndOperand(.get_global, @intCast(arg_idx));
+            try self.emitCodeAndOperand(result.get, @intCast(arg_idx.?));
         }
+    }
+
+    fn resolveLocal(self: *Compiler, name: Token) ?usize {
+        var i: usize = self.locals_info.locals.items.len;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals_info.locals.items[i];
+
+            // Return the local's index if the requested name matches.
+            // We need to compare the strings by value since these are pointers into
+            // the original source string, rather than interned strings that we can
+            // compare by pointer.
+            if (std.mem.eql(u8, name.text_ref, local.name.text_ref)) {
+                if (local.depth == null) {
+                    self.markError("Cannot ready local variable in its own initialzer.");
+                    // Should we return here?
+                }
+
+                return i;
+            }
+        }
+        return null;
     }
 
     fn unary(self: *Compiler, _: Parsecontext) !void {
         const prev_kind = self.parser.previous.kind;
 
         // Compile the operand of the unary expression.
-        try self.parseWithPrecendece(.unary);
+        try self.parseWithPrecedence(.unary);
 
         switch (prev_kind) {
             .minus => try self.emitCode(.negate),
@@ -328,7 +450,7 @@ pub const Compiler = struct {
         const op_kind = self.parser.previous.kind;
         const rule = self.getRule(op_kind);
 
-        try self.parseWithPrecendece(rule.precedence.withOneMoreBindingPower());
+        try self.parseWithPrecedence(rule.precedence.withOneMoreBindingPower());
 
         switch (op_kind) {
             .bang_equal => try self.emitCodeAndOperand(.equal, @intFromEnum(OpCode.not)),
@@ -356,7 +478,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn parseWithPrecendece(self: *Compiler, precendence: Precendence) !void {
+    fn parseWithPrecedence(self: *Compiler, precedence: Precendence) !void {
         self.advance();
 
         const prefix_rule = self.getRule(self.parser.previous.kind).prefix;
@@ -365,10 +487,10 @@ pub const Compiler = struct {
             self.markError("Expect expression");
             return;
         }
-        const can_assign = precendence.hasLessOrEqBindingPowerThan(.assignment);
+        const can_assign = precedence.hasLessOrEqBindingPowerThan(.assignment);
         try prefix_rule.?(self, .{ .can_assign = can_assign });
 
-        while (precendence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.current.kind).precedence)) {
+        while (precedence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.current.kind).precedence)) {
             self.advance();
 
             const infix_rule = self.getRule(self.parser.previous.kind).infix;
@@ -402,5 +524,9 @@ pub const Compiler = struct {
             return 0;
         }
         return @intCast(constIdx);
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        self.locals_info.deinit(self.allocator);
     }
 };

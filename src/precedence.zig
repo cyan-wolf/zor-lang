@@ -1,6 +1,6 @@
 const Compiler = @import("compiler.zig").Compiler;
 
-pub const Precendence = enum {
+pub const Precedence = enum {
     none,
     assignment, // =
     p_or, // or
@@ -13,11 +13,11 @@ pub const Precendence = enum {
     call, // . ()
     primary,
 
-    pub fn withOneMoreBindingPower(self: Precendence) Precendence {
+    pub fn withOneMoreBindingPower(self: Precedence) Precedence {
         return @enumFromInt(@intFromEnum(self) + 1);
     }
 
-    pub fn hasLessOrEqBindingPowerThan(self: Precendence, other: Precendence) bool {
+    pub fn hasLessOrEqBindingPowerThan(self: Precedence, other: Precedence) bool {
         return @intFromEnum(self) <= @intFromEnum(other);
     }
 };
@@ -36,5 +36,5 @@ pub const ParseFn = *const fn (*Compiler, ParseContext) ParseFnError!void;
 pub const ParseRule = struct {
     prefix: ?ParseFn,
     infix: ?ParseFn,
-    precedence: Precendence,
+    precedence: Precedence,
 };

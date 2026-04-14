@@ -202,9 +202,9 @@ pub const VM = struct {
                     return;
                 },
                 .print => {
-                    self.pop().show();
+                    // Use the pretty-print representation.
+                    self.pop().show_pretty();
                     std.debug.print("\n", .{});
-                    return;
                 },
                 .constant => {
                     const constant = self.readConstant();
@@ -269,7 +269,15 @@ pub const VM = struct {
                         // TODO: Also put the name of the variable in the error message.
                         try self.reportRuntimeError("Undefined variable.");
                     }
-                    try self.alloc_monitor.globals.put(name, self.peek(9));
+                    try self.alloc_monitor.globals.put(name, self.peek(0));
+                },
+                .get_local => {
+                    const slot = self.readByte();
+                    try self.push(self.stack.items[slot]);
+                },
+                .set_local => {
+                    const slot = self.readByte();
+                    self.stack.items[slot] = self.peek(0);
                 },
             }
         }
@@ -278,7 +286,16 @@ pub const VM = struct {
     pub fn repl(self: *VM) !void {
         while (true) {
             const line = try self.cli.input("> ");
-            try self.interpret(line);
+
+            self.interpret(line) catch |err| switch (err) {
+                error.CompileError => {
+                    std.debug.print("[!] Compile Error Detected\n", .{});
+                },
+                error.RuntimeError => {
+                    std.debug.print("[!] Runtime Error Detected\n", .{});
+                },
+                else => return err,
+            };
         }
     }
 
@@ -313,5 +330,7 @@ pub const VM = struct {
 
         self.chunk = null;
         self.stack.deinit(self.allocator);
+
+        self.compiler.?.deinit();
     }
 };
