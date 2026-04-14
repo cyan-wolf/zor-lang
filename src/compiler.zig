@@ -12,7 +12,7 @@ const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
-const Precendence = precedence_mod.Precendence;
+const Precendence = precedence_mod.Precedence;
 const Parsecontext = precedence_mod.ParseContext;
 const ParseRule = precedence_mod.ParseRule;
 const AllocMonitor = @import("vm.zig").AllocMonitor;
@@ -196,7 +196,7 @@ pub const Compiler = struct {
     }
 
     fn expression(self: *Compiler) !void {
-        try self.parseWithPrecendece(.assignment);
+        try self.parseWithPrecedence(.assignment);
     }
 
     // This has an explicit error set in the function definition
@@ -252,6 +252,8 @@ pub const Compiler = struct {
             try self.beginScope();
             try self.block();
             try self.endScope();
+        } else {
+            try self.expressionStatement();
         }
 
         if (self.parser.in_panic_mode) {
@@ -270,6 +272,12 @@ pub const Compiler = struct {
         self.consume(.semicolon, "Expected ';' after variable declaration.");
 
         try self.defineVariable(global_var_idx);
+    }
+
+    fn expressionStatement(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.semicolon, "Expected ';' after expression.");
+        try self.emitCode(.pop);
     }
 
     fn parseVariable(self: *Compiler, error_message: []const u8) !usize {
@@ -429,7 +437,7 @@ pub const Compiler = struct {
         const prev_kind = self.parser.previous.kind;
 
         // Compile the operand of the unary expression.
-        try self.parseWithPrecendece(.unary);
+        try self.parseWithPrecedence(.unary);
 
         switch (prev_kind) {
             .minus => try self.emitCode(.negate),
@@ -442,7 +450,7 @@ pub const Compiler = struct {
         const op_kind = self.parser.previous.kind;
         const rule = self.getRule(op_kind);
 
-        try self.parseWithPrecendece(rule.precedence.withOneMoreBindingPower());
+        try self.parseWithPrecedence(rule.precedence.withOneMoreBindingPower());
 
         switch (op_kind) {
             .bang_equal => try self.emitCodeAndOperand(.equal, @intFromEnum(OpCode.not)),
@@ -470,7 +478,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn parseWithPrecendece(self: *Compiler, precendence: Precendence) !void {
+    fn parseWithPrecedence(self: *Compiler, precedence: Precendence) !void {
         self.advance();
 
         const prefix_rule = self.getRule(self.parser.previous.kind).prefix;
@@ -479,10 +487,10 @@ pub const Compiler = struct {
             self.markError("Expect expression");
             return;
         }
-        const can_assign = precendence.hasLessOrEqBindingPowerThan(.assignment);
+        const can_assign = precedence.hasLessOrEqBindingPowerThan(.assignment);
         try prefix_rule.?(self, .{ .can_assign = can_assign });
 
-        while (precendence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.current.kind).precedence)) {
+        while (precedence.hasLessOrEqBindingPowerThan(self.getRule(self.parser.current.kind).precedence)) {
             self.advance();
 
             const infix_rule = self.getRule(self.parser.previous.kind).infix;
