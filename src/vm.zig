@@ -205,7 +205,6 @@ pub const VM = struct {
                     // Use the pretty-print representation.
                     self.pop().show_pretty();
                     std.debug.print("\n", .{});
-                    return;
                 },
                 .constant => {
                     const constant = self.readConstant();
