@@ -240,6 +240,34 @@ pub const Compiler = struct {
         self.advance();
     }
 
+    // NOTE: This parses Rust-style if statements (optional parentheses and a required block)
+    // i.e. if <cond> {<stmt1>; <stmt2}; ... ) rather than if (<cond>) <stmt | block>
+    fn statementIf(self: *Compiler) !void {
+        try self.expression();
+
+        self.consume(.left_brace, "Expected '{' before if body.");
+
+        const thenJump = try self.emitJump(.jump_if_false);
+        try self.emitCode(.pop);
+
+        try self.beginScope();
+        try self.block();
+        try self.endScope();
+
+        const elseJump = try self.emitJump(.jump);
+        try self.patchJump(thenJump);
+        try self.emitCode(.pop);
+
+        if (self.match(.k_else)) {
+            self.consume(.left_brace, "Expected '{' before else body.");
+
+            try self.beginScope();
+            try self.block();
+            try self.endScope();
+        }
+        try self.patchJump(elseJump);
+    }
+
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
             try self.variableDeclaration();
@@ -252,6 +280,8 @@ pub const Compiler = struct {
             try self.beginScope();
             try self.block();
             try self.endScope();
+        } else if (self.match(.k_if)) {
+            try self.statementIf();
         } else {
             try self.expressionStatement();
         }
@@ -340,6 +370,25 @@ pub const Compiler = struct {
 
     fn emitCode(self: *Compiler, code: OpCode) !void {
         try self.emitByte(@intFromEnum(code));
+    }
+
+    fn emitJump(self: *Compiler, code: OpCode) !usize {
+        try self.emitCode(code);
+        try self.emitByte(0xff);
+        try self.emitByte(0xff);
+
+        return self.currentChunk().code.items.len - 2;
+    }
+
+    fn patchJump(self: *Compiler, offset: usize) !void {
+        const jump: u16 = @intCast(self.currentChunk().code.items.len - offset - 2);
+
+        if (jump > std.math.maxInt(u16)) {
+            self.markError("Jump offset is too large.");
+        }
+
+        const target_bytes = self.currentChunk().code.items[offset..][0..2];
+        std.mem.writeInt(u16, target_bytes, jump, .big);
     }
 
     fn emitCodeAndOperand(self: *Compiler, code: OpCode, operand: CodeContent) !void {

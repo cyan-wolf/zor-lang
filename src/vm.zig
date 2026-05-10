@@ -134,6 +134,12 @@ pub const VM = struct {
         return content;
     }
 
+    fn readU16(self: *VM) u16 {
+        const content = std.mem.readInt(u16, self.chunk.?.code.items[self.ip..][0..2], .big);
+        self.ip += 2;
+        return content;
+    }
+
     // Note: We assume that the current byte is a valid op code.
     fn readCode(self: *VM) OpCode {
         return @enumFromInt(self.readByte());
@@ -279,6 +285,16 @@ pub const VM = struct {
                     const slot = self.readByte();
                     self.stack.items[slot] = self.peek(0);
                 },
+                .jump_if_false => {
+                    const offset = self.readU16();
+                    if (self.peek(0).isFalsey()) {
+                        self.ip += offset;
+                    }
+                },
+                .jump => {
+                    const offset = self.readU16();
+                    self.ip += offset;
+                }
             }
         }
     }
