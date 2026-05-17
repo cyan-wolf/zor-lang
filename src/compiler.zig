@@ -86,8 +86,8 @@ pub const Compiler = struct {
                 .identifier = .{ .prefix = Compiler.variable, .infix = null, .precedence = .none },
                 .string = .{ .prefix = Compiler.string, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
-                .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_and = .{ .prefix = null, .infix = Compiler.and_, .precedence = .p_and },
+                .k_or = .{ .prefix = null, .infix = Compiler.or_, .precedence = .p_or },
                 .k_class = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_else = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_false = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
@@ -429,6 +429,26 @@ pub const Compiler = struct {
     fn number(self: *Compiler, _: Parsecontext) !void {
         const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
+    }
+
+    fn and_(self: *Compiler, _: Parsecontext) !void {
+        const endJump = try self.emitJump(.jump_if_false);
+
+        try self.emitCode(.pop);
+        try self.parseWithPrecedence(.p_and);
+
+        try self.patchJump(endJump);
+    }
+
+    fn or_(self: *Compiler, _: Parsecontext) !void {
+        const elseJump = try self.emitJump(.jump_if_false);
+        const endJump = try self.emitJump(.jump);
+
+        try self.patchJump(elseJump);
+        try self.emitCode(.pop);
+
+        try self.parseWithPrecedence(.p_or);
+        try self.patchJump(endJump);
     }
 
     fn string(self: *Compiler, _: Parsecontext) !void {
