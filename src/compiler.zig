@@ -268,6 +268,25 @@ pub const Compiler = struct {
         try self.patchJump(elseJump);
     }
 
+    fn statementWhile(self: *Compiler) !void {
+        const loopStart = self.currentChunk().code.items.len;
+        try self.expression();
+
+        self.consume(.left_brace, "Expected '{' before while body.");
+
+        const exitJump = try self.emitJump(.jump_if_false);
+        try self.emitCode(.pop);
+
+        try self.beginScope();
+        try self.block();
+        try self.endScope();
+
+        try self.emitLoop(loopStart);
+
+        try self.patchJump(exitJump);
+        try self.emitCode(.pop);
+    }
+
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
             try self.variableDeclaration();
@@ -282,6 +301,8 @@ pub const Compiler = struct {
             try self.endScope();
         } else if (self.match(.k_if)) {
             try self.statementIf();
+        } else if (self.match(.k_while)) {
+            try self.statementWhile();
         } else {
             try self.expressionStatement();
         }
@@ -378,6 +399,25 @@ pub const Compiler = struct {
         try self.emitByte(0xff);
 
         return self.currentChunk().code.items.len - 2;
+    }
+
+    fn emitLoop(self: *Compiler, loop_start: usize) !void {
+        try self.emitCode(.loop);
+
+        const code_list = &self.currentChunk().code;
+
+        const offset = code_list.items.len - loop_start + 2;
+
+        if (offset > std.math.maxInt(u16)) {
+            self.markError("Loop body too large.");
+        }
+
+        // Fill in the 2 byte operand for the .loop op code.
+        try self.emitByte(0);
+        try self.emitByte(0);
+
+        const target_bytes = code_list.items[code_list.items.len - 2 ..][0..2];
+        std.mem.writeInt(u16, target_bytes, @intCast(offset), .big);
     }
 
     fn patchJump(self: *Compiler, offset: usize) !void {
