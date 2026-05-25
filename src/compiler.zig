@@ -287,6 +287,59 @@ pub const Compiler = struct {
         try self.emitCode(.pop);
     }
 
+    fn statementFor(self: *Compiler) !void {
+        try self.beginScope(); // for scoping variables in initializer
+
+        if (self.match(.semicolon)) {
+            // No initializer.
+        } else if (self.match(.k_var)) {
+            try self.variableDeclaration();
+        } else {
+            try self.expressionStatement();
+        }
+
+        var loop_start = self.currentChunk().code.items.len;
+
+        var exit_jump: ?usize = null;
+        if (!self.match(.semicolon)) {
+            try self.expression();
+            self.consume(.semicolon, "Expected ';' after loop condition.");
+
+            exit_jump = try self.emitJump(.jump_if_false);
+            try self.emitCode(.pop);
+        }
+
+        // self.consume(.semicolon, "Expected ';'.");
+
+        // Increment clause.
+        if (!self.check(.left_brace)) {
+            const body_jump = try self.emitJump(.jump);
+            const increment_start = self.currentChunk().code.items.len;
+
+            try self.expression();
+            try self.emitCode(.pop);
+
+            try self.emitLoop(loop_start);
+            loop_start = increment_start;
+            try self.patchJump(body_jump);
+        }
+
+        self.consume(.left_brace, "Expected '{' before for body.");
+
+        try self.beginScope();
+        try self.block();
+        try self.endScope();
+
+        try self.emitLoop(loop_start);
+
+        if (exit_jump) |jump| {
+            try self.patchJump(jump);
+            try self.emitCode(.pop);
+        }
+
+        try self.endScope(); // for scoping variables in initializer
+    }
+
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
             try self.variableDeclaration();
@@ -303,6 +356,8 @@ pub const Compiler = struct {
             try self.statementIf();
         } else if (self.match(.k_while)) {
             try self.statementWhile();
+        } else if (self.match(.k_for)) {
+            try self.statementFor();
         } else {
             try self.expressionStatement();
         }
