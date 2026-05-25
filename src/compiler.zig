@@ -86,8 +86,8 @@ pub const Compiler = struct {
                 .identifier = .{ .prefix = Compiler.variable, .infix = null, .precedence = .none },
                 .string = .{ .prefix = Compiler.string, .infix = null, .precedence = .none },
                 .number = .{ .prefix = Compiler.number, .infix = null, .precedence = .none },
-                .k_and = .{ .prefix = null, .infix = null, .precedence = .none },
-                .k_or = .{ .prefix = null, .infix = null, .precedence = .none },
+                .k_and = .{ .prefix = null, .infix = Compiler.and_, .precedence = .p_and },
+                .k_or = .{ .prefix = null, .infix = Compiler.or_, .precedence = .p_or },
                 .k_class = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_else = .{ .prefix = null, .infix = null, .precedence = .none },
                 .k_false = .{ .prefix = Compiler.literal, .infix = null, .precedence = .none },
@@ -240,6 +240,106 @@ pub const Compiler = struct {
         self.advance();
     }
 
+    // NOTE: This parses Rust-style if statements (optional parentheses and a required block)
+    // i.e. if <cond> {<stmt1>; <stmt2}; ... ) rather than if (<cond>) <stmt | block>
+    fn statementIf(self: *Compiler) !void {
+        try self.expression();
+
+        self.consume(.left_brace, "Expected '{' before if body.");
+
+        const thenJump = try self.emitJump(.jump_if_false);
+        try self.emitCode(.pop);
+
+        try self.beginScope();
+        try self.block();
+        try self.endScope();
+
+        const elseJump = try self.emitJump(.jump);
+        try self.patchJump(thenJump);
+        try self.emitCode(.pop);
+
+        if (self.match(.k_else)) {
+            self.consume(.left_brace, "Expected '{' before else body.");
+
+            try self.beginScope();
+            try self.block();
+            try self.endScope();
+        }
+        try self.patchJump(elseJump);
+    }
+
+    fn statementWhile(self: *Compiler) !void {
+        const loopStart = self.currentChunk().code.items.len;
+        try self.expression();
+
+        self.consume(.left_brace, "Expected '{' before while body.");
+
+        const exitJump = try self.emitJump(.jump_if_false);
+        try self.emitCode(.pop);
+
+        try self.beginScope();
+        try self.block();
+        try self.endScope();
+
+        try self.emitLoop(loopStart);
+
+        try self.patchJump(exitJump);
+        try self.emitCode(.pop);
+    }
+
+    fn statementFor(self: *Compiler) !void {
+        try self.beginScope(); // for scoping variables in initializer
+
+        if (self.match(.semicolon)) {
+            // No initializer.
+        } else if (self.match(.k_var)) {
+            try self.variableDeclaration();
+        } else {
+            try self.expressionStatement();
+        }
+
+        var loop_start = self.currentChunk().code.items.len;
+
+        var exit_jump: ?usize = null;
+        if (!self.match(.semicolon)) {
+            try self.expression();
+            self.consume(.semicolon, "Expected ';' after loop condition.");
+
+            exit_jump = try self.emitJump(.jump_if_false);
+            try self.emitCode(.pop);
+        }
+
+        // self.consume(.semicolon, "Expected ';'.");
+
+        // Increment clause.
+        if (!self.check(.left_brace)) {
+            const body_jump = try self.emitJump(.jump);
+            const increment_start = self.currentChunk().code.items.len;
+
+            try self.expression();
+            try self.emitCode(.pop);
+
+            try self.emitLoop(loop_start);
+            loop_start = increment_start;
+            try self.patchJump(body_jump);
+        }
+
+        self.consume(.left_brace, "Expected '{' before for body.");
+
+        try self.beginScope();
+        try self.block();
+        try self.endScope();
+
+        try self.emitLoop(loop_start);
+
+        if (exit_jump) |jump| {
+            try self.patchJump(jump);
+            try self.emitCode(.pop);
+        }
+
+        try self.endScope(); // for scoping variables in initializer
+    }
+
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
             try self.variableDeclaration();
@@ -252,6 +352,12 @@ pub const Compiler = struct {
             try self.beginScope();
             try self.block();
             try self.endScope();
+        } else if (self.match(.k_if)) {
+            try self.statementIf();
+        } else if (self.match(.k_while)) {
+            try self.statementWhile();
+        } else if (self.match(.k_for)) {
+            try self.statementFor();
         } else {
             try self.expressionStatement();
         }
@@ -342,6 +448,44 @@ pub const Compiler = struct {
         try self.emitByte(@intFromEnum(code));
     }
 
+    fn emitJump(self: *Compiler, code: OpCode) !usize {
+        try self.emitCode(code);
+        try self.emitByte(0xff);
+        try self.emitByte(0xff);
+
+        return self.currentChunk().code.items.len - 2;
+    }
+
+    fn emitLoop(self: *Compiler, loop_start: usize) !void {
+        try self.emitCode(.loop);
+
+        const code_list = &self.currentChunk().code;
+
+        const offset = code_list.items.len - loop_start + 2;
+
+        if (offset > std.math.maxInt(u16)) {
+            self.markError("Loop body too large.");
+        }
+
+        // Fill in the 2 byte operand for the .loop op code.
+        try self.emitByte(0);
+        try self.emitByte(0);
+
+        const target_bytes = code_list.items[code_list.items.len - 2 ..][0..2];
+        std.mem.writeInt(u16, target_bytes, @intCast(offset), .big);
+    }
+
+    fn patchJump(self: *Compiler, offset: usize) !void {
+        const jump: u16 = @intCast(self.currentChunk().code.items.len - offset - 2);
+
+        if (jump > std.math.maxInt(u16)) {
+            self.markError("Jump offset is too large.");
+        }
+
+        const target_bytes = self.currentChunk().code.items[offset..][0..2];
+        std.mem.writeInt(u16, target_bytes, jump, .big);
+    }
+
     fn emitCodeAndOperand(self: *Compiler, code: OpCode, operand: CodeContent) !void {
         try self.emitCode(code);
         try self.emitByte(operand);
@@ -380,6 +524,26 @@ pub const Compiler = struct {
     fn number(self: *Compiler, _: Parsecontext) !void {
         const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
+    }
+
+    fn and_(self: *Compiler, _: Parsecontext) !void {
+        const endJump = try self.emitJump(.jump_if_false);
+
+        try self.emitCode(.pop);
+        try self.parseWithPrecedence(.p_and);
+
+        try self.patchJump(endJump);
+    }
+
+    fn or_(self: *Compiler, _: Parsecontext) !void {
+        const elseJump = try self.emitJump(.jump_if_false);
+        const endJump = try self.emitJump(.jump);
+
+        try self.patchJump(elseJump);
+        try self.emitCode(.pop);
+
+        try self.parseWithPrecedence(.p_or);
+        try self.patchJump(endJump);
     }
 
     fn string(self: *Compiler, _: Parsecontext) !void {
