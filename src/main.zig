@@ -2,7 +2,9 @@ const std = @import("std");
 const chunk_mod = @import("chunk.zig");
 const Chunk = chunk_mod.Chunk;
 const OpCode = chunk_mod.OpCode;
-const VM = @import("vm.zig").VM;
+const vm_mod = @import("vm.zig");
+const VM = vm_mod.VM;
+const ZorConfig = vm_mod.ZorConfig;
 const Cli = @import("cli.zig").Cli;
 
 pub fn main() !void {
@@ -26,7 +28,17 @@ pub fn main() !void {
 
     const cli = Cli.init(&out_buf, &in_buf);
 
-    var vm = VM.init(allocator, cli);
+    // TODO: read this from command line arguments.
+    const config: ZorConfig = .{
+        .trace_execution = false,
+        .trace_parser_advance = false,
+    };
+
+    var vm = VM.init(
+        allocator,
+        cli,
+        config,
+    );
     defer vm.deinit();
 
     if (args.len == 1) {
