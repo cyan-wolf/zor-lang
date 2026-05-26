@@ -15,10 +15,10 @@ const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precedence;
 const Parsecontext = precedence_mod.ParseContext;
 const ParseRule = precedence_mod.ParseRule;
-const AllocMonitor = @import("vm.zig").AllocMonitor;
+const vm_mod = @import("vm.zig");
+const AllocMonitor = vm_mod.AllocMonitor;
+const ZorConfig = vm_mod.ZorConfig;
 const LocalsInfo = @import("locals.zig").LocalsInfo;
-
-const DEBUG_PRINT_CODE = true;
 
 const OpPair = struct {
     get: OpCode,
@@ -42,6 +42,8 @@ pub const Parser = struct {
 };
 
 pub const Compiler = struct {
+    config: ZorConfig,
+
     source: []const u8,
     scanner: Scanner,
     parser: Parser,
@@ -54,8 +56,10 @@ pub const Compiler = struct {
     allocator: std.mem.Allocator,
     alloc_monitor: *AllocMonitor,
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor) Compiler {
+    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor, config: ZorConfig) Compiler {
         return .{
+            .config = config,
+
             .source = source,
             .scanner = Scanner.init(source),
             .parser = Parser.init(),
@@ -126,7 +130,9 @@ pub const Compiler = struct {
     }
 
     fn advance(self: *Compiler) void {
-        std.debug.print("Moving from {s} to {s}\n", .{ @tagName(self.parser.previous.kind), @tagName(self.parser.current.kind) });
+        if (self.config.trace_parser_advance) {
+            std.debug.print("[Parser] {s} -> {s}\n", .{ @tagName(self.parser.previous.kind), @tagName(self.parser.current.kind) });
+        }
 
         self.parser.previous = self.parser.current;
 
@@ -179,7 +185,7 @@ pub const Compiler = struct {
             self.advance();
             return;
         }
-        std.debug.print("WRONG --> {s} hmmm {d}\n", .{ @tagName(self.parser.current.kind), self.scanner.current });
+        std.debug.print("[Parser] Error Log: unexpected {s} at {d}\n", .{ @tagName(self.parser.current.kind), self.scanner.current });
         self.markErrorAtCurrent(message);
     }
 
@@ -514,7 +520,7 @@ pub const Compiler = struct {
     fn end(self: *Compiler) !void {
         try self.emitReturn();
 
-        if (DEBUG_PRINT_CODE) {
+        if (self.config.dissasemble_chunk_at_end) {
             if (!self.parser.had_error) {
                 self.currentChunk().disassemble("code");
             }

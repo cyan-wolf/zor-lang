@@ -17,7 +17,11 @@ const Table = table_mod.Table;
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
 
-pub const DEBUG_TRACE_EXECUTION = true;
+pub const ZorConfig = struct {
+    trace_execution: bool,
+    trace_parser_advance: bool,
+    dissasemble_chunk_at_end: bool = false,
+};
 
 pub const InterpretError = error{
     CompileError,
@@ -76,6 +80,8 @@ pub const AllocMonitor = struct {
 };
 
 pub const VM = struct {
+    config: ZorConfig,
+
     chunk: ?*Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
@@ -85,8 +91,10 @@ pub const VM = struct {
     cli: Cli,
     compiler: ?Compiler,
 
-    pub fn init(allocator: Allocator, cli: Cli) VM {
+    pub fn init(allocator: Allocator, cli: Cli, config: ZorConfig) VM {
         return .{
+            .config = config,
+
             .chunk = null,
             .ip = 0,
             .stack = .empty,
@@ -106,7 +114,7 @@ pub const VM = struct {
         self.ip = 0;
 
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator, &self.alloc_monitor);
+        self.compiler = Compiler.init(source, self.allocator, &self.alloc_monitor, self.config);
 
         const couldCompile = try self.compiler.?.compile(&chunk);
         if (!couldCompile) {
@@ -184,7 +192,7 @@ pub const VM = struct {
 
     fn run(self: *VM) !void {
         while (true) {
-            if (DEBUG_TRACE_EXECUTION) {
+            if (self.config.trace_execution) {
                 // Print the stack.
                 std.debug.print("        ", .{});
                 for (self.stack.items) |slot| {
