@@ -14,6 +14,8 @@ const StringPoolContext = table_mod.StringPoolContext;
 const StringPool = table_mod.StringPool;
 const Table = table_mod.Table;
 
+const CallFrame = @import("call_frame.zig").CallFrame;
+
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
 
@@ -82,8 +84,9 @@ pub const AllocMonitor = struct {
 pub const VM = struct {
     config: ZorConfig,
 
-    chunk: ?*Chunk,
-    ip: usize,
+    frames: std.ArrayList(CallFrame),
+    curr_frame: *CallFrame = undefined,
+
     stack: std.ArrayList(Value),
     alloc_monitor: AllocMonitor,
 
@@ -95,8 +98,7 @@ pub const VM = struct {
         return .{
             .config = config,
 
-            .chunk = null,
-            .ip = 0,
+            .frames = .empty,
             .stack = .empty,
             .alloc_monitor = AllocMonitor.init(allocator),
 
@@ -107,21 +109,23 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, source: []const u8) !void {
-        var chunk = Chunk.init();
-        defer chunk.deinit(self.allocator);
-
-        self.chunk = &chunk;
-        self.ip = 0;
-
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator, &self.alloc_monitor, self.config);
+        self.compiler = try Compiler.init(source, .script, self.allocator, &self.alloc_monitor, self.config);
 
-        const couldCompile = try self.compiler.?.compile(&chunk);
-        if (!couldCompile) {
+        const func = try self.compiler.?.compile();
+        if (func) |function| {
+            try self.push(Value.fromObj(function.as_obj()));
+
+            try self.frames.append(self.allocator, .{
+                .function = function,
+                .ip = 0,
+                .stack_start_idx = 0,
+            });
+
+            try self.run();
+        } else {
             return error.CompileError;
         }
-
-        try self.run();
     }
 
     fn peek(self: *const VM, distance: usize) Value {
@@ -137,14 +141,14 @@ pub const VM = struct {
     }
 
     fn readByte(self: *VM) CodeContent {
-        const content = self.chunk.?.code.items[self.ip];
-        self.ip += 1;
+        const content = self.curr_frame.function.chunk.code.items[self.curr_frame.ip];
+        self.curr_frame.ip += 1;
         return content;
     }
 
     fn readU16(self: *VM) u16 {
-        const content = std.mem.readInt(u16, self.chunk.?.code.items[self.ip..][0..2], .big);
-        self.ip += 2;
+        const content = std.mem.readInt(u16, self.curr_frame.function.chunk.code.items[self.curr_frame.ip..][0..2], .big);
+        self.curr_frame.ip += 2;
         return content;
     }
 
@@ -155,7 +159,7 @@ pub const VM = struct {
 
     fn readConstant(self: *VM) Value {
         const constantIdx = self.readByte();
-        return self.chunk.?.constants.items[constantIdx];
+        return self.curr_frame.function.chunk.constants.items[constantIdx];
     }
 
     inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div, less, greater }) !void {
@@ -192,6 +196,8 @@ pub const VM = struct {
 
     fn run(self: *VM) !void {
         while (true) {
+            self.curr_frame = &self.frames.items[self.frames.items.len - 1];
+
             if (self.config.trace_execution) {
                 // Print the stack.
                 std.debug.print("        ", .{});
@@ -203,7 +209,7 @@ pub const VM = struct {
                 std.debug.print("\n", .{});
 
                 // Print the current instruction.
-                _ = self.chunk.?.disassembleInstruction(self.ip);
+                _ = self.curr_frame.function.chunk.disassembleInstruction(self.curr_frame.ip);
             }
 
             // The instruction pointer should always end up pointing to
@@ -287,25 +293,25 @@ pub const VM = struct {
                 },
                 .get_local => {
                     const slot = self.readByte();
-                    try self.push(self.stack.items[slot]);
+                    try self.push(self.stack.items[self.curr_frame.stack_start_idx + slot]);
                 },
                 .set_local => {
                     const slot = self.readByte();
-                    self.stack.items[slot] = self.peek(0);
+                    self.stack.items[self.curr_frame.stack_start_idx + slot] = self.peek(0);
                 },
                 .jump_if_false => {
                     const offset = self.readU16();
                     if (self.peek(0).isFalsey()) {
-                        self.ip += offset;
+                        self.curr_frame.ip += offset;
                     }
                 },
                 .jump => {
                     const offset = self.readU16();
-                    self.ip += offset;
+                    self.curr_frame.ip += offset;
                 },
                 .loop => {
                     const offset = self.readU16();
-                    self.ip -= offset;
+                    self.curr_frame.ip -= offset;
                 },
             }
         }
@@ -342,8 +348,8 @@ pub const VM = struct {
     }
 
     fn reportRuntimeError(self: *VM, message: []const u8) !void {
-        const instructionIdx = self.ip;
-        const line = self.chunk.?.lines.items[instructionIdx];
+        const instructionIdx = self.curr_frame.ip;
+        const line = self.curr_frame.function.chunk.lines.items[instructionIdx];
 
         std.debug.print("{s} [line {d}] in script\n", .{ message, line });
 
@@ -356,7 +362,7 @@ pub const VM = struct {
     pub fn deinit(self: *VM) void {
         self.alloc_monitor.deinit();
 
-        self.chunk = null;
+        // self.chunk = null;
         self.stack.deinit(self.allocator);
 
         self.compiler.?.deinit();

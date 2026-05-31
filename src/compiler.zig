@@ -7,6 +7,7 @@ const CodeContent = chunk_mod.CodeContent;
 const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const Obj = value_mod.Obj;
+const ObjFunction = value_mod.ObjFunction;
 const ObjString = value_mod.ObjString;
 const token_mod = @import("token.zig");
 const Token = token_mod.Token;
@@ -41,6 +42,11 @@ pub const Parser = struct {
     }
 };
 
+const FunctionKind = enum {
+    function,
+    script,
+};
+
 pub const Compiler = struct {
     config: ZorConfig,
 
@@ -49,6 +55,9 @@ pub const Compiler = struct {
     parser: Parser,
     complingChunk: *Chunk,
 
+    curr_function: *ObjFunction,
+    curr_function_kind: FunctionKind,
+
     rules: std.enums.EnumArray(TokenKind, ParseRule),
 
     locals_info: LocalsInfo,
@@ -56,7 +65,7 @@ pub const Compiler = struct {
     allocator: std.mem.Allocator,
     alloc_monitor: *AllocMonitor,
 
-    pub fn init(source: []const u8, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor, config: ZorConfig) Compiler {
+    pub fn init(source: []const u8, func_kind: FunctionKind, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor, config: ZorConfig) !Compiler {
         return .{
             .config = config,
 
@@ -65,7 +74,10 @@ pub const Compiler = struct {
             .parser = Parser.init(),
             .complingChunk = undefined,
 
-            .locals_info = .{},
+            .curr_function_kind = func_kind,
+            .curr_function = try ObjFunction.createNew(alloctor),
+
+            .locals_info = try LocalsInfo.init(alloctor),
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -116,17 +128,19 @@ pub const Compiler = struct {
         };
     }
 
-    pub fn compile(self: *Compiler, chunk: *Chunk) !bool {
-        self.complingChunk = chunk;
-
+    pub fn compile(self: *Compiler) !?*ObjFunction {
         self.advance();
 
         while (!self.match(.eof)) {
             try self.statement();
         }
 
-        try self.end();
-        return !self.parser.had_error;
+        const function = try self.end();
+        if (self.parser.had_error) {
+            return null;
+        } else {
+            return function;
+        }
     }
 
     fn advance(self: *Compiler) void {
@@ -177,7 +191,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *Chunk {
-        return self.complingChunk;
+        return &self.curr_function.chunk;
     }
 
     fn consume(self: *Compiler, kind: TokenKind, message: []const u8) void {
@@ -517,14 +531,17 @@ pub const Compiler = struct {
         }
     }
 
-    fn end(self: *Compiler) !void {
+    fn end(self: *Compiler) !*ObjFunction {
         try self.emitReturn();
+
+        const function = self.curr_function;
 
         if (self.config.dissasemble_chunk_at_end) {
             if (!self.parser.had_error) {
-                self.currentChunk().disassemble("code");
+                self.currentChunk().disassemble(function.get_name());
             }
         }
+        return function;
     }
 
     fn number(self: *Compiler, _: Parsecontext) !void {

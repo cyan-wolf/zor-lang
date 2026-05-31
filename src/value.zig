@@ -1,5 +1,6 @@
 const std = @import("std");
 const hashString = @import("table.zig").hashString;
+const Chunk = @import("chunk.zig").Chunk;
 
 pub const Value = union(enum) {
     number: f64,
@@ -41,7 +42,7 @@ pub const Value = union(enum) {
         return switch (self) {
             .obj => |o| switch (o.kind) {
                 .string => o.as_obj_string_mut(),
-                // else => unreachable,
+                else => unreachable,
             },
             else => unreachable,
         };
@@ -51,7 +52,7 @@ pub const Value = union(enum) {
         return switch (self) {
             .obj => |o| switch (o.kind) {
                 .string => true,
-                // else => false,
+                else => false,
             },
             else => false,
         };
@@ -107,6 +108,7 @@ pub const Value = union(enum) {
 
 pub const ObjKind = enum {
     string,
+    function,
 };
 
 pub const Obj = struct {
@@ -125,6 +127,17 @@ pub const Obj = struct {
                     // (std.mem.eql).
                     return o1 == o2;
                 },
+                else => return false,
+            },
+            .function => switch (other.kind) {
+                .function => {
+                    const o1 = self.as_obj_function_const();
+                    const o2 = other.as_obj_function_const();
+
+                    // Pointer equality.
+                    return o1 == o2;
+                },
+                else => return false,
             },
         }
     }
@@ -134,6 +147,10 @@ pub const Obj = struct {
             .string => {
                 const obj_string = self.as_obj_string_const();
                 std.debug.print("[object string '{s}']", .{obj_string.data});
+            },
+            .function => {
+                const name: []const u8 = if (self.as_obj_function_const().name) |str| str.data else "";
+                std.debug.print("<fn {s}>", .{name});
             },
         }
     }
@@ -145,6 +162,7 @@ pub const Obj = struct {
                 const obj_string = self.as_obj_string_const();
                 std.debug.print("{s}", .{obj_string.data});
             },
+            else => self.show(),
         }
     }
 
@@ -156,12 +174,25 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    fn as_obj_function_mut(self: *Obj) *ObjFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    fn as_obj_function_const(self: *const Obj) *const ObjFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     pub fn deinit(self: *Obj, allocator: std.mem.Allocator) void {
         switch (self.kind) {
             .string => {
                 const string = self.as_obj_string_mut();
                 defer allocator.free(string.data);
                 defer allocator.destroy(string);
+            },
+            .function => {
+                const func = self.as_obj_function_mut();
+                // TODO
+                _ = func;
             },
         }
     }
@@ -193,6 +224,40 @@ pub const ObjString = struct {
     }
 
     pub fn as_obj(self: *ObjString) *Obj {
+        return @ptrCast(self);
+    }
+};
+
+pub const ObjFunction = struct {
+    obj: Obj,
+    arity: usize,
+    chunk: Chunk,
+    name: ?*const ObjString,
+
+    pub fn createNew(allocator: std.mem.Allocator) !*ObjFunction {
+        const ptr = try allocator.create(ObjFunction);
+        ptr.* = .{
+            .obj = .{
+                .kind = .function,
+                .next = null,
+            },
+            .arity = 0,
+            .name = null,
+            .chunk = Chunk.init(),
+        };
+
+        return ptr;
+    }
+
+    pub fn get_name(self: *const ObjFunction) []const u8 {
+        return if (self.name) |str| blk: {
+            break :blk str.data;
+        } else blk: {
+            break :blk "<script>";
+        };
+    }
+
+    pub fn as_obj(self: *ObjFunction) *Obj {
         return @ptrCast(self);
     }
 };
