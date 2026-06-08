@@ -110,7 +110,7 @@ pub const VM = struct {
 
     pub fn interpret(self: *VM, source: []const u8) !void {
         // NOTE: This might not have to be a field of VM.
-        self.compiler = try Compiler.init(source, .script, self.allocator, &self.alloc_monitor, self.config);
+        self.compiler = try Compiler.init(source, self.allocator, &self.alloc_monitor, self.config);
 
         const func = try self.compiler.?.compile();
         if (func) |function| {

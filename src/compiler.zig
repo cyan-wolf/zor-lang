@@ -47,37 +47,57 @@ const FunctionKind = enum {
     script,
 };
 
+pub const FunctionCompiler = struct {
+    locals_info: LocalsInfo,
+    curr_function: *ObjFunction,
+    curr_function_kind: FunctionKind,
+
+    // NOTE: This pointer has really bad lifecyle semantics, it might be better to allocate all the
+    // `FunctionCompiler`s in an arena managed by the `Compiler` and instead `enclosing` refers to function-compilers
+    // by index instead of by pointer.
+    enclosing: ?*FunctionCompiler,
+
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, func_kind: FunctionKind, enclosing: ?*FunctionCompiler) !FunctionCompiler {
+        return .{
+            .locals_info = try LocalsInfo.init(allocator),
+            .curr_function = try ObjFunction.createNew(allocator),
+            .curr_function_kind = func_kind,
+            .enclosing = enclosing,
+
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *FunctionCompiler) void {
+        self.locals_info.deinit(self.allocator);
+    }
+};
+
 pub const Compiler = struct {
     config: ZorConfig,
 
     source: []const u8,
     scanner: Scanner,
     parser: Parser,
-    complingChunk: *Chunk,
 
-    curr_function: *ObjFunction,
-    curr_function_kind: FunctionKind,
+    func_context: *FunctionCompiler,
 
     rules: std.enums.EnumArray(TokenKind, ParseRule),
-
-    locals_info: LocalsInfo,
 
     allocator: std.mem.Allocator,
     alloc_monitor: *AllocMonitor,
 
-    pub fn init(source: []const u8, func_kind: FunctionKind, alloctor: std.mem.Allocator, alloc_monitor: *AllocMonitor, config: ZorConfig) !Compiler {
+    pub fn init(source: []const u8, allocator: std.mem.Allocator, alloc_monitor: *AllocMonitor, config: ZorConfig) !Compiler {
         return .{
             .config = config,
 
             .source = source,
             .scanner = Scanner.init(source),
             .parser = Parser.init(),
-            .complingChunk = undefined,
 
-            .curr_function_kind = func_kind,
-            .curr_function = try ObjFunction.createNew(alloctor),
-
-            .locals_info = try LocalsInfo.init(alloctor),
+            .func_context = undefined,
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
                 .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
@@ -123,19 +143,25 @@ pub const Compiler = struct {
                 .none = .{ .prefix = null, .infix = null, .precedence = .none },
             }),
 
-            .allocator = alloctor,
+            .allocator = allocator,
             .alloc_monitor = alloc_monitor,
         };
     }
 
     pub fn compile(self: *Compiler) !?*ObjFunction {
+        // The top-level of the script is denoted by a special function of kind `script`.
+        var root_func_context = try FunctionCompiler.init(self.allocator, .script, null);
+        defer root_func_context.deinit();
+
+        self.func_context = &root_func_context;
+
         self.advance();
 
         while (!self.match(.eof)) {
             try self.statement();
         }
 
-        const function = try self.end();
+        const function = try self.finish();
         if (self.parser.had_error) {
             return null;
         } else {
@@ -191,7 +217,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *Chunk {
-        return &self.curr_function.chunk;
+        return &self.func_context.curr_function.chunk;
     }
 
     fn consume(self: *Compiler, kind: TokenKind, message: []const u8) void {
@@ -314,6 +340,8 @@ pub const Compiler = struct {
             // No initializer.
         } else if (self.match(.k_var)) {
             try self.variableDeclaration();
+        } else if (self.match(.k_fun)) {
+            try self.funDeclaration();
         } else {
             try self.expressionStatement();
         }
@@ -328,8 +356,6 @@ pub const Compiler = struct {
             exit_jump = try self.emitJump(.jump_if_false);
             try self.emitCode(.pop);
         }
-
-        // self.consume(.semicolon, "Expected ';'.");
 
         // Increment clause.
         if (!self.check(.left_brace)) {
@@ -400,6 +426,14 @@ pub const Compiler = struct {
         try self.defineVariable(global_var_idx);
     }
 
+    fn funDeclaration(self: *Compiler) !void {
+        const global = try self.parseVariable("Expected function name.");
+        self.markInitialized();
+
+        try self.compileFunction(.function);
+        try self.defineVariable(global);
+    }
+
     fn expressionStatement(self: *Compiler) !void {
         try self.expression();
         self.consume(.semicolon, "Expected ';' after expression.");
@@ -411,7 +445,7 @@ pub const Compiler = struct {
 
         try self.declareVariable();
 
-        if (self.locals_info.scope_depth > 0) {
+        if (self.func_context.locals_info.scope_depth > 0) {
             return 0;
         }
 
@@ -422,7 +456,7 @@ pub const Compiler = struct {
         // If the scope depth is zero, then this is a global variable.
         // Global variables are late bound and hence have different logic
         // for declaring them/
-        if (self.locals_info.scope_depth == 0) {
+        if (self.func_context.locals_info.scope_depth == 0) {
             return;
         }
         const name = self.parser.previous;
@@ -430,7 +464,7 @@ pub const Compiler = struct {
     }
 
     fn addLocal(self: *Compiler, name: Token) !void {
-        try self.locals_info.locals.append(self.allocator, .{
+        try self.func_context.locals_info.locals.append(self.allocator, .{
             .name = name,
             // null represents uninitialized
             .depth = null,
@@ -441,7 +475,7 @@ pub const Compiler = struct {
         // If the scope depth is greater than zero, then we are defining a
         // local variable. In that case we exit the function the function early
         // before we emit the code used for definining a global variable.
-        if (self.locals_info.scope_depth > 0) {
+        if (self.func_context.locals_info.scope_depth > 0) {
             self.markInitialized();
             return;
         }
@@ -450,9 +484,12 @@ pub const Compiler = struct {
     }
 
     fn markInitialized(self: *Compiler) void {
+        if (self.func_context.locals_info.scope_depth == 0) {
+            return;
+        }
         // Locals start out with their scope set to `null` meaning it is uninitialized.
         // Setting the depth to the current scope depth signals that the local is ready.
-        self.locals_info.locals.items[self.locals_info.locals.items.len - 1].depth = self.locals_info.scope_depth;
+        self.func_context.locals_info.locals.items[self.func_context.locals_info.locals.items.len - 1].depth = self.func_context.locals_info.scope_depth;
     }
 
     fn identifierConstant(self: *Compiler, name_source: Token) !usize {
@@ -512,29 +549,29 @@ pub const Compiler = struct {
     }
 
     fn beginScope(self: *Compiler) !void {
-        self.locals_info.scope_depth += 1;
+        self.func_context.locals_info.scope_depth += 1;
     }
 
     fn endScope(self: *Compiler) !void {
-        self.locals_info.scope_depth -= 1;
+        self.func_context.locals_info.scope_depth -= 1;
 
         // Walk backwards through the local variable array and discard them.
-        while (self.locals_info.locals.items.len > 0) {
-            const next_local = self.locals_info.locals.getLast();
+        while (self.func_context.locals_info.locals.items.len > 0) {
+            const next_local = self.func_context.locals_info.locals.getLast();
 
-            if (next_local.depth != null and next_local.depth.? > self.locals_info.scope_depth) {
+            if (next_local.depth != null and next_local.depth.? > self.func_context.locals_info.scope_depth) {
                 try self.emitCode(.pop);
-                _ = self.locals_info.locals.pop();
+                _ = self.func_context.locals_info.locals.pop();
             } else {
                 break;
             }
         }
     }
 
-    fn end(self: *Compiler) !*ObjFunction {
+    fn finish(self: *Compiler) !*ObjFunction {
         try self.emitReturn();
 
-        const function = self.curr_function;
+        const function = self.func_context.curr_function;
 
         if (self.config.dissasemble_chunk_at_end) {
             if (!self.parser.had_error) {
@@ -547,6 +584,28 @@ pub const Compiler = struct {
     fn number(self: *Compiler, _: Parsecontext) !void {
         const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
+    }
+
+    fn compileFunction(self: *Compiler, kind: FunctionKind) !void {
+        var nested_func_context = try FunctionCompiler.init(self.allocator, kind, self.func_context);
+        defer nested_func_context.deinit();
+
+        const parent_func_context = self.func_context;
+        self.func_context = &nested_func_context;
+
+        try self.beginScope(); // no need to close this scope since we end (.finish) the compiler later
+
+        self.consume(.left_paren, "Expected '(' after function name.");
+        self.consume(.right_paren, "Expected ')' after function name.");
+        self.consume(.left_brace, "Expected '{' after function name.");
+        try self.block();
+
+        const function = try self.finish();
+
+        // Restore enclosing context.
+        self.func_context = parent_func_context;
+
+        try self.emitCodeAndOperand(.constant, try self.makeConstant(Value.fromObj(function.as_obj())));
     }
 
     fn and_(self: *Compiler, _: Parsecontext) !void {
@@ -599,10 +658,10 @@ pub const Compiler = struct {
     }
 
     fn resolveLocal(self: *Compiler, name: Token) ?usize {
-        var i: usize = self.locals_info.locals.items.len;
+        var i: usize = self.func_context.locals_info.locals.items.len;
         while (i > 0) {
             i -= 1;
-            const local = self.locals_info.locals.items[i];
+            const local = self.func_context.locals_info.locals.items[i];
 
             // Return the local's index if the requested name matches.
             // We need to compare the strings by value since these are pointers into
@@ -714,6 +773,6 @@ pub const Compiler = struct {
     }
 
     pub fn deinit(self: *Compiler) void {
-        self.locals_info.deinit(self.allocator);
+        _ = self;
     }
 };
