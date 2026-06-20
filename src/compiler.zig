@@ -14,7 +14,7 @@ const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
 const precedence_mod = @import("precedence.zig");
 const Precendence = precedence_mod.Precedence;
-const Parsecontext = precedence_mod.ParseContext;
+const ParseContext = precedence_mod.ParseContext;
 const ParseRule = precedence_mod.ParseRule;
 const vm_mod = @import("vm.zig");
 const AllocMonitor = vm_mod.AllocMonitor;
@@ -581,7 +581,7 @@ pub const Compiler = struct {
         return function;
     }
 
-    fn number(self: *Compiler, _: Parsecontext) !void {
+    fn number(self: *Compiler, _: ParseContext) !void {
         const value = Value.fromNumber(try std.fmt.parseFloat(f64, self.parser.previous.text_ref));
         try self.emitConstant(value);
     }
@@ -628,7 +628,7 @@ pub const Compiler = struct {
         try self.emitCodeAndOperand(.constant, try self.makeConstant(Value.fromObj(function.as_obj())));
     }
 
-    fn and_(self: *Compiler, _: Parsecontext) !void {
+    fn and_(self: *Compiler, _: ParseContext) !void {
         const endJump = try self.emitJump(.jump_if_false);
 
         try self.emitCode(.pop);
@@ -637,7 +637,7 @@ pub const Compiler = struct {
         try self.patchJump(endJump);
     }
 
-    fn or_(self: *Compiler, _: Parsecontext) !void {
+    fn or_(self: *Compiler, _: ParseContext) !void {
         const elseJump = try self.emitJump(.jump_if_false);
         const endJump = try self.emitJump(.jump);
 
@@ -648,18 +648,18 @@ pub const Compiler = struct {
         try self.patchJump(endJump);
     }
 
-    fn string(self: *Compiler, _: Parsecontext) !void {
+    fn string(self: *Compiler, _: ParseContext) !void {
         const string_data = self.parser.previous.text_ref[1 .. self.parser.previous.text_ref.len - 1];
         const obj_string = try self.alloc_monitor.createOrGetInternedObjString(string_data);
 
         try self.emitConstant(Value.fromObj(@ptrCast(obj_string)));
     }
 
-    fn variable(self: *Compiler, ctx: Parsecontext) !void {
+    fn variable(self: *Compiler, ctx: ParseContext) !void {
         try self.namedVariable(self.parser.previous, ctx);
     }
 
-    fn namedVariable(self: *Compiler, name: Token, ctx: Parsecontext) !void {
+    fn namedVariable(self: *Compiler, name: Token, ctx: ParseContext) !void {
         var arg_idx = self.resolveLocal(name);
 
         const result: OpPair = if (arg_idx != null) blk: {
@@ -699,7 +699,7 @@ pub const Compiler = struct {
         return null;
     }
 
-    fn unary(self: *Compiler, _: Parsecontext) !void {
+    fn unary(self: *Compiler, _: ParseContext) !void {
         const prev_kind = self.parser.previous.kind;
 
         // Compile the operand of the unary expression.
@@ -712,7 +712,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(self: *Compiler, _: Parsecontext) !void {
+    fn binary(self: *Compiler, _: ParseContext) !void {
         const op_kind = self.parser.previous.kind;
         const rule = self.getRule(op_kind);
 
@@ -733,7 +733,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn literal(self: *Compiler, _: Parsecontext) !void {
+    fn literal(self: *Compiler, _: ParseContext) !void {
         const op_kind = self.parser.previous.kind;
 
         switch (op_kind) {
@@ -769,7 +769,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn grouping(self: *Compiler, _: Parsecontext) !void {
+    fn grouping(self: *Compiler, _: ParseContext) !void {
         try self.expression();
         self.consume(.right_paren, "Expect ')' after expression.");
     }
