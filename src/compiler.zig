@@ -282,8 +282,8 @@ pub const Compiler = struct {
                 },
                 else => {},
             }
+            self.advance();
         }
-        self.advance();
     }
 
     // NOTE: This parses Rust-style if statements (optional parentheses and a required block)
@@ -340,8 +340,6 @@ pub const Compiler = struct {
             // No initializer.
         } else if (self.match(.k_var)) {
             try self.variableDeclaration();
-        } else if (self.match(.k_fun)) {
-            try self.funDeclaration();
         } else {
             try self.expressionStatement();
         }
@@ -404,6 +402,8 @@ pub const Compiler = struct {
             try self.statementWhile();
         } else if (self.match(.k_for)) {
             try self.statementFor();
+        } else if (self.match(.k_fun)) {
+            try self.funDeclaration();
         } else {
             try self.expressionStatement();
         }
@@ -590,12 +590,32 @@ pub const Compiler = struct {
         var nested_func_context = try FunctionCompiler.init(self.allocator, kind, self.func_context);
         defer nested_func_context.deinit();
 
+        nested_func_context.curr_function.name = try self.alloc_monitor.createOrGetInternedObjString(self.parser.previous.text_ref);
+
         const parent_func_context = self.func_context;
         self.func_context = &nested_func_context;
 
         try self.beginScope(); // no need to close this scope since we end (.finish) the compiler later
 
         self.consume(.left_paren, "Expected '(' after function name.");
+
+        // Gather parameter names and make them local variables in the function.
+        if (!self.check(.right_paren)) {
+            while (true) {
+                self.func_context.curr_function.arity += 1;
+
+                if (self.func_context.curr_function.arity > 255) {
+                    self.markErrorAtCurrent("A function cannot have more than 255 parameters.");
+                }
+                const const_idx = try self.parseVariable("Expected parameter name.");
+                try self.defineVariable(const_idx);
+
+                if (!self.match(.comma)) {
+                    break;
+                }
+            }
+        }
+
         self.consume(.right_paren, "Expected ')' after function name.");
         self.consume(.left_brace, "Expected '{' after function name.");
         try self.block();
