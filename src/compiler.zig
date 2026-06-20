@@ -100,7 +100,7 @@ pub const Compiler = struct {
             .func_context = undefined,
 
             .rules = std.enums.EnumArray(TokenKind, ParseRule).init(.{
-                .left_paren = .{ .prefix = Compiler.grouping, .infix = null, .precedence = .none },
+                .left_paren = .{ .prefix = Compiler.grouping, .infix = Compiler.call, .precedence = .call },
                 .right_paren = .{ .prefix = null, .infix = null, .precedence = .none },
                 .left_brace = .{ .prefix = null, .infix = null, .precedence = .none },
                 .right_brace = .{ .prefix = null, .infix = null, .precedence = .none },
@@ -483,6 +483,26 @@ pub const Compiler = struct {
         try self.emitCodeAndOperand(.define_global, @intCast(global_var_idx));
     }
 
+    fn argumentList(self: *Compiler) !CodeContent {
+        var arg_count: CodeContent = 0;
+        if (!self.check(.right_paren)) {
+            while (true) {
+                try self.expression();
+
+                if (arg_count == std.math.maxInt(CodeContent)) {
+                    self.markError("Too many arguments.");
+                }
+                arg_count += 1;
+
+                if (!self.match(.comma)) {
+                    break;
+                }
+            }
+        }
+        self.consume(.right_paren, "Expected ')' after arguments.");
+        return arg_count;
+    }
+
     fn markInitialized(self: *Compiler) void {
         if (self.func_context.locals_info.scope_depth == 0) {
             return;
@@ -731,6 +751,11 @@ pub const Compiler = struct {
             .slash => try self.emitCode(.divide),
             else => unreachable,
         }
+    }
+
+    fn call(self: *Compiler, _: ParseContext) !void {
+        const arg_count = try self.argumentList();
+        try self.emitCodeAndOperand(.call, arg_count);
     }
 
     fn literal(self: *Compiler, _: ParseContext) !void {

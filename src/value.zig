@@ -48,10 +48,30 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn asFunction(self: Value) *ObjFunction {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .function => o.as_obj_function_mut(),
+                else => unreachable,
+            },
+            else => unreachable,
+        };
+    }
+
     pub fn isString(self: Value) bool {
         return switch (self) {
             .obj => |o| switch (o.kind) {
                 .string => true,
+                else => false,
+            },
+            else => false,
+        };
+    }
+
+    pub fn isFunction(self: Value) bool {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .function => true,
                 else => false,
             },
             else => false,

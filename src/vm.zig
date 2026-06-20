@@ -8,6 +8,7 @@ const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
+const ObjFunction = value_mod.ObjFunction;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
 const StringPoolContext = table_mod.StringPoolContext;
@@ -23,6 +24,7 @@ pub const ZorConfig = struct {
     trace_execution: bool,
     trace_parser_advance: bool,
     dissasemble_chunk_at_end: bool = false,
+    max_stack_frames: usize = 100,
 };
 
 pub const InterpretError = error{
@@ -116,11 +118,8 @@ pub const VM = struct {
         if (func) |function| {
             try self.push(Value.fromObj(function.as_obj()));
 
-            try self.frames.append(self.allocator, .{
-                .function = function,
-                .ip = 0,
-                .stack_start_idx = 0,
-            });
+            // Here, `function` is the top level of the script, so we call it.
+            try self.call(function, 0);
 
             try self.run();
         } else {
@@ -138,6 +137,31 @@ pub const VM = struct {
 
     fn pop(self: *VM) Value {
         return self.stack.pop() orelse unreachable;
+    }
+
+    fn callValue(self: *VM, callee: Value, arg_count: usize) !void {
+        if (callee.isFunction()) {
+            const function = callee.asFunction();
+            try self.call(function, arg_count);
+        }
+        try self.reportRuntimeError("Value must be a function or a class to be called.");
+    }
+
+    fn call(self: *VM, function: *ObjFunction, arg_count: usize) !void {
+        if (arg_count != function.arity) {
+            try self.reportRuntimeError("Wrong number of arguments.");
+        }
+
+        if (self.frames.items.len == self.config.max_stack_frames) {
+            try self.reportRuntimeError("Stack overflow.");
+        }
+
+        const frame: CallFrame = .{
+            .function = function,
+            .ip = 0,
+            .stack_start_idx = self.stack.items.len - arg_count - 1,
+        };
+        try self.frames.append(self.allocator, frame);
     }
 
     fn readByte(self: *VM) CodeContent {
@@ -196,6 +220,7 @@ pub const VM = struct {
 
     fn run(self: *VM) !void {
         while (true) {
+            // NOTE: self-referential struct
             self.curr_frame = &self.frames.items[self.frames.items.len - 1];
 
             if (self.config.trace_execution) {
@@ -312,6 +337,15 @@ pub const VM = struct {
                 .loop => {
                     const offset = self.readU16();
                     self.curr_frame.ip -= offset;
+                },
+                .call => {
+                    const arg_count = self.readByte();
+                    try self.callValue(self.peek(arg_count), arg_count);
+
+                    // Since a function was just called, the current frame should point to the top of the
+                    // `self.frames` stack.
+                    // NOTE: self referential struct (!!!) - use indices for curr_frame if lifetimes get bad.
+                    self.curr_frame = &self.frames.items[self.frames.items.len - 1];
                 },
             }
         }
