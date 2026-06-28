@@ -169,7 +169,7 @@ pub const Obj = struct {
                 std.debug.print("[object string '{s}']", .{obj_string.data});
             },
             .function => {
-                const name: []const u8 = if (self.as_obj_function_const().name) |str| str.data else "";
+                const name: []const u8 = self.as_obj_function_const().get_name();
                 std.debug.print("<fn {s}>", .{name});
             },
         }
@@ -273,7 +273,7 @@ pub const ObjFunction = struct {
         return if (self.name) |str| blk: {
             break :blk str.data;
         } else blk: {
-            break :blk "<script>";
+            break :blk "script";
         };
     }
 

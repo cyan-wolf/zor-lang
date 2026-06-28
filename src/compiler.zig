@@ -256,16 +256,30 @@ pub const Compiler = struct {
         self.consume(.right_brace, "Expected '}' after block.");
     }
 
-    fn statement_print(self: *Compiler) !void {
+    fn statementPrint(self: *Compiler) !void {
         try self.expression();
         self.consume(.semicolon, "Expected ';' after expression.");
         try self.emitCode(.print);
     }
 
-    fn statement_expression(self: *Compiler) !void {
+    fn statementExpression(self: *Compiler) !void {
         try self.expression();
         self.consume(.semicolon, "Expected ';' after expression.");
         try self.emitCode(.pop);
+    }
+
+    fn statementReturn(self: *Compiler) !void {
+        if (self.func_context.curr_function_kind == .script) {
+            self.markError("Cannot return from top-level code.");
+        }
+
+        if (self.match(.semicolon)) {
+            try self.emitReturn();
+        } else {
+            try self.expression();
+            self.consume(.semicolon, "Expected ';' after return value.");
+            try self.emitCode(.opreturn);
+        }
     }
 
     fn synchronize(self: *Compiler) void {
@@ -387,11 +401,8 @@ pub const Compiler = struct {
     fn statement(self: *Compiler) !void {
         if (self.match(.k_var)) {
             try self.variableDeclaration();
-            return;
-        }
-
-        if (self.match(.k_print)) {
-            try self.statement_print();
+        } else if (self.match(.k_print)) {
+            try self.statementPrint();
         } else if (self.match(.left_brace)) {
             try self.beginScope();
             try self.block();
@@ -404,6 +415,8 @@ pub const Compiler = struct {
             try self.statementFor();
         } else if (self.match(.k_fun)) {
             try self.funDeclaration();
+        } else if (self.match(.k_return)) {
+            try self.statementReturn();
         } else {
             try self.expressionStatement();
         }
@@ -800,6 +813,7 @@ pub const Compiler = struct {
     }
 
     fn emitReturn(self: *Compiler) !void {
+        try self.emitCode(.nil);
         try self.emitCode(.opreturn);
     }
 

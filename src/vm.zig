@@ -143,6 +143,7 @@ pub const VM = struct {
         if (callee.isFunction()) {
             const function = callee.asFunction();
             try self.call(function, arg_count);
+            return;
         }
         try self.reportRuntimeError("Value must be a function or a class to be called.");
     }
@@ -243,8 +244,19 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
-                    // does nothing for now
-                    return;
+                    const result = self.pop();
+
+                    _ = self.frames.pop();
+
+                    if (self.frames.items.len == 0) {
+                        _ = self.pop();
+                        return;
+                    }
+
+                    try self.push(result);
+
+                    // NOTE: self-referential type
+                    self.curr_frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .print => {
                     // Use the pretty-print representation.
@@ -386,6 +398,15 @@ pub const VM = struct {
         const line = self.curr_frame.function.chunk.lines.items[instructionIdx];
 
         std.debug.print("{s} [line {d}] in script\n", .{ message, line });
+
+        // Stack trace.
+        std.debug.print("Stack Trace:\n", .{});
+        for (0..self.frames.items.len) |i| {
+            const frame = &self.frames.items[self.frames.items.len - i - 1];
+            const function = frame.function;
+
+            std.debug.print("| {s}(...)\n", .{function.get_name()});
+        }
 
         // Reset the stack.
         self.stack.clearAndFree(self.allocator);
