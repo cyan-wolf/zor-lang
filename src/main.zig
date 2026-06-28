@@ -34,7 +34,7 @@ pub fn main() !void {
         .trace_parser_advance = false,
     };
 
-    var vm = VM.init(
+    var vm = try VM.init(
         allocator,
         cli,
         config,

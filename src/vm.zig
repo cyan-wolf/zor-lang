@@ -9,6 +9,8 @@ const Value = value_mod.Value;
 const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
 const ObjFunction = value_mod.ObjFunction;
+const ObjNativeFunction = value_mod.ObjNativeFunction;
+const NativeFunction = value_mod.NativeFunction;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
 const StringPoolContext = table_mod.StringPoolContext;
@@ -19,6 +21,8 @@ const CallFrame = @import("call_frame.zig").CallFrame;
 
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
+
+const native_functions = @import("native_functions.zig");
 
 pub const ZorConfig = struct {
     trace_execution: bool,
@@ -96,8 +100,8 @@ pub const VM = struct {
     cli: Cli,
     compiler: ?Compiler,
 
-    pub fn init(allocator: Allocator, cli: Cli, config: ZorConfig) VM {
-        return .{
+    pub fn init(allocator: Allocator, cli: Cli, config: ZorConfig) !VM {
+        var self = VM{
             .config = config,
 
             .frames = .empty,
@@ -108,6 +112,10 @@ pub const VM = struct {
             .cli = cli,
             .compiler = null,
         };
+
+        try self.defineNative("clock", native_functions.nativeFunctionClock, 0);
+
+        return self;
     }
 
     pub fn interpret(self: *VM, source: []const u8) !void {
@@ -143,9 +151,20 @@ pub const VM = struct {
         if (callee.isFunction()) {
             const function = callee.asFunction();
             try self.call(function, arg_count);
-            return;
+        } else if (callee.isNativeFunction()) {
+            // TODO: extract this native function calling logic to a separate helper.
+            const native_function = callee.asNativeFunction();
+
+            if (native_function.arity != arg_count) {
+                try self.reportRuntimeError("Wrong number of arguments.");
+            }
+            const args = self.stack.items[self.stack.items.len - arg_count - 1 ..];
+            const res = try native_function.function(arg_count, args);
+
+            try self.push(res);
+        } else {
+            try self.reportRuntimeError("Value must be a function or a class to be called.");
         }
-        try self.reportRuntimeError("Value must be a function or a class to be called.");
     }
 
     fn call(self: *VM, function: *ObjFunction, arg_count: usize) !void {
@@ -412,6 +431,21 @@ pub const VM = struct {
         self.stack.clearAndFree(self.allocator);
 
         return error.RuntimeError;
+    }
+
+    pub fn defineNative(self: *VM, name: []const u8, function: NativeFunction, arity: usize) !void {
+        const func_name = try self.alloc_monitor.createOrGetInternedObjString(name);
+        try self.push(Value.fromObj(func_name.as_obj()));
+
+        const native_function = try ObjNativeFunction.init(self.allocator, function, arity);
+        const native_func_value = Value.fromObj(native_function.as_obj());
+        try self.push(native_func_value);
+
+        try self.alloc_monitor.globals.put(func_name, native_func_value);
+
+        // Pop the func name and value off the stack (we only used it to avoid GC issues).
+        _ = self.pop();
+        _ = self.pop();
     }
 
     pub fn deinit(self: *VM) void {
