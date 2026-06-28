@@ -8,19 +8,27 @@ const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const Obj = value_mod.Obj;
 const ObjString = value_mod.ObjString;
+const ObjFunction = value_mod.ObjFunction;
+const ObjNativeFunction = value_mod.ObjNativeFunction;
+const NativeFunction = value_mod.NativeFunction;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
 const StringPoolContext = table_mod.StringPoolContext;
 const StringPool = table_mod.StringPool;
 const Table = table_mod.Table;
 
+const CallFrame = @import("call_frame.zig").CallFrame;
+
 const Cli = @import("cli.zig").Cli;
 const Compiler = @import("compiler.zig").Compiler;
+
+const native_functions = @import("native_functions.zig");
 
 pub const ZorConfig = struct {
     trace_execution: bool,
     trace_parser_advance: bool,
     dissasemble_chunk_at_end: bool = false,
+    max_stack_frames: usize = 100,
 };
 
 pub const InterpretError = error{
@@ -82,8 +90,9 @@ pub const AllocMonitor = struct {
 pub const VM = struct {
     config: ZorConfig,
 
-    chunk: ?*Chunk,
-    ip: usize,
+    frames: std.ArrayList(CallFrame),
+    curr_frame: *CallFrame = undefined,
+
     stack: std.ArrayList(Value),
     alloc_monitor: AllocMonitor,
 
@@ -91,12 +100,11 @@ pub const VM = struct {
     cli: Cli,
     compiler: ?Compiler,
 
-    pub fn init(allocator: Allocator, cli: Cli, config: ZorConfig) VM {
-        return .{
+    pub fn init(allocator: Allocator, cli: Cli, config: ZorConfig) !VM {
+        var self = VM{
             .config = config,
 
-            .chunk = null,
-            .ip = 0,
+            .frames = .empty,
             .stack = .empty,
             .alloc_monitor = AllocMonitor.init(allocator),
 
@@ -104,24 +112,27 @@ pub const VM = struct {
             .cli = cli,
             .compiler = null,
         };
+
+        try self.defineNative("clock", native_functions.nativeFunctionClock, 0);
+
+        return self;
     }
 
     pub fn interpret(self: *VM, source: []const u8) !void {
-        var chunk = Chunk.init();
-        defer chunk.deinit(self.allocator);
-
-        self.chunk = &chunk;
-        self.ip = 0;
-
         // NOTE: This might not have to be a field of VM.
-        self.compiler = Compiler.init(source, self.allocator, &self.alloc_monitor, self.config);
+        self.compiler = try Compiler.init(source, self.allocator, &self.alloc_monitor, self.config);
 
-        const couldCompile = try self.compiler.?.compile(&chunk);
-        if (!couldCompile) {
+        const func = try self.compiler.?.compile();
+        if (func) |function| {
+            try self.push(Value.fromObj(function.as_obj()));
+
+            // Here, `function` is the top level of the script, so we call it.
+            try self.call(function, 0);
+
+            try self.run();
+        } else {
             return error.CompileError;
         }
-
-        try self.run();
     }
 
     fn peek(self: *const VM, distance: usize) Value {
@@ -136,15 +147,52 @@ pub const VM = struct {
         return self.stack.pop() orelse unreachable;
     }
 
+    fn callValue(self: *VM, callee: Value, arg_count: usize) !void {
+        if (callee.isFunction()) {
+            const function = callee.asFunction();
+            try self.call(function, arg_count);
+        } else if (callee.isNativeFunction()) {
+            // TODO: extract this native function calling logic to a separate helper.
+            const native_function = callee.asNativeFunction();
+
+            if (native_function.arity != arg_count) {
+                try self.reportRuntimeError("Wrong number of arguments.");
+            }
+            const args = self.stack.items[self.stack.items.len - arg_count - 1 ..];
+            const res = try native_function.function(arg_count, args);
+
+            try self.push(res);
+        } else {
+            try self.reportRuntimeError("Value must be a function or a class to be called.");
+        }
+    }
+
+    fn call(self: *VM, function: *ObjFunction, arg_count: usize) !void {
+        if (arg_count != function.arity) {
+            try self.reportRuntimeError("Wrong number of arguments.");
+        }
+
+        if (self.frames.items.len == self.config.max_stack_frames) {
+            try self.reportRuntimeError("Stack overflow.");
+        }
+
+        const frame: CallFrame = .{
+            .function = function,
+            .ip = 0,
+            .stack_start_idx = self.stack.items.len - arg_count - 1,
+        };
+        try self.frames.append(self.allocator, frame);
+    }
+
     fn readByte(self: *VM) CodeContent {
-        const content = self.chunk.?.code.items[self.ip];
-        self.ip += 1;
+        const content = self.curr_frame.function.chunk.code.items[self.curr_frame.ip];
+        self.curr_frame.ip += 1;
         return content;
     }
 
     fn readU16(self: *VM) u16 {
-        const content = std.mem.readInt(u16, self.chunk.?.code.items[self.ip..][0..2], .big);
-        self.ip += 2;
+        const content = std.mem.readInt(u16, self.curr_frame.function.chunk.code.items[self.curr_frame.ip..][0..2], .big);
+        self.curr_frame.ip += 2;
         return content;
     }
 
@@ -155,7 +203,7 @@ pub const VM = struct {
 
     fn readConstant(self: *VM) Value {
         const constantIdx = self.readByte();
-        return self.chunk.?.constants.items[constantIdx];
+        return self.curr_frame.function.chunk.constants.items[constantIdx];
     }
 
     inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div, less, greater }) !void {
@@ -192,6 +240,9 @@ pub const VM = struct {
 
     fn run(self: *VM) !void {
         while (true) {
+            // NOTE: self-referential struct
+            self.curr_frame = &self.frames.items[self.frames.items.len - 1];
+
             if (self.config.trace_execution) {
                 // Print the stack.
                 std.debug.print("        ", .{});
@@ -203,7 +254,7 @@ pub const VM = struct {
                 std.debug.print("\n", .{});
 
                 // Print the current instruction.
-                _ = self.chunk.?.disassembleInstruction(self.ip);
+                _ = self.curr_frame.function.chunk.disassembleInstruction(self.curr_frame.ip);
             }
 
             // The instruction pointer should always end up pointing to
@@ -212,8 +263,19 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
-                    // does nothing for now
-                    return;
+                    const result = self.pop();
+
+                    _ = self.frames.pop();
+
+                    if (self.frames.items.len == 0) {
+                        _ = self.pop();
+                        return;
+                    }
+
+                    try self.push(result);
+
+                    // NOTE: self-referential type
+                    self.curr_frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .print => {
                     // Use the pretty-print representation.
@@ -287,25 +349,34 @@ pub const VM = struct {
                 },
                 .get_local => {
                     const slot = self.readByte();
-                    try self.push(self.stack.items[slot]);
+                    try self.push(self.stack.items[self.curr_frame.stack_start_idx + slot]);
                 },
                 .set_local => {
                     const slot = self.readByte();
-                    self.stack.items[slot] = self.peek(0);
+                    self.stack.items[self.curr_frame.stack_start_idx + slot] = self.peek(0);
                 },
                 .jump_if_false => {
                     const offset = self.readU16();
                     if (self.peek(0).isFalsey()) {
-                        self.ip += offset;
+                        self.curr_frame.ip += offset;
                     }
                 },
                 .jump => {
                     const offset = self.readU16();
-                    self.ip += offset;
+                    self.curr_frame.ip += offset;
                 },
                 .loop => {
                     const offset = self.readU16();
-                    self.ip -= offset;
+                    self.curr_frame.ip -= offset;
+                },
+                .call => {
+                    const arg_count = self.readByte();
+                    try self.callValue(self.peek(arg_count), arg_count);
+
+                    // Since a function was just called, the current frame should point to the top of the
+                    // `self.frames` stack.
+                    // NOTE: self referential struct (!!!) - use indices for curr_frame if lifetimes get bad.
+                    self.curr_frame = &self.frames.items[self.frames.items.len - 1];
                 },
             }
         }
@@ -342,10 +413,19 @@ pub const VM = struct {
     }
 
     fn reportRuntimeError(self: *VM, message: []const u8) !void {
-        const instructionIdx = self.ip;
-        const line = self.chunk.?.lines.items[instructionIdx];
+        const instructionIdx = self.curr_frame.ip;
+        const line = self.curr_frame.function.chunk.lines.items[instructionIdx];
 
         std.debug.print("{s} [line {d}] in script\n", .{ message, line });
+
+        // Stack trace.
+        std.debug.print("Stack Trace:\n", .{});
+        for (0..self.frames.items.len) |i| {
+            const frame = &self.frames.items[self.frames.items.len - i - 1];
+            const function = frame.function;
+
+            std.debug.print("| {s}(...)\n", .{function.get_name()});
+        }
 
         // Reset the stack.
         self.stack.clearAndFree(self.allocator);
@@ -353,10 +433,25 @@ pub const VM = struct {
         return error.RuntimeError;
     }
 
+    pub fn defineNative(self: *VM, name: []const u8, function: NativeFunction, arity: usize) !void {
+        const func_name = try self.alloc_monitor.createOrGetInternedObjString(name);
+        try self.push(Value.fromObj(func_name.as_obj()));
+
+        const native_function = try ObjNativeFunction.init(self.allocator, function, arity);
+        const native_func_value = Value.fromObj(native_function.as_obj());
+        try self.push(native_func_value);
+
+        try self.alloc_monitor.globals.put(func_name, native_func_value);
+
+        // Pop the func name and value off the stack (we only used it to avoid GC issues).
+        _ = self.pop();
+        _ = self.pop();
+    }
+
     pub fn deinit(self: *VM) void {
         self.alloc_monitor.deinit();
 
-        self.chunk = null;
+        // self.chunk = null;
         self.stack.deinit(self.allocator);
 
         self.compiler.?.deinit();

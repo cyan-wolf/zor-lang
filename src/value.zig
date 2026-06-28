@@ -1,5 +1,6 @@
 const std = @import("std");
 const hashString = @import("table.zig").hashString;
+const Chunk = @import("chunk.zig").Chunk;
 
 pub const Value = union(enum) {
     number: f64,
@@ -41,7 +42,27 @@ pub const Value = union(enum) {
         return switch (self) {
             .obj => |o| switch (o.kind) {
                 .string => o.as_obj_string_mut(),
-                // else => unreachable,
+                else => unreachable,
+            },
+            else => unreachable,
+        };
+    }
+
+    pub fn asFunction(self: Value) *ObjFunction {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .function => o.as_obj_function_mut(),
+                else => unreachable,
+            },
+            else => unreachable,
+        };
+    }
+
+    pub fn asNativeFunction(self: Value) *ObjNativeFunction {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .native_function => o.as_obj_native_function_mut(),
+                else => unreachable,
             },
             else => unreachable,
         };
@@ -51,7 +72,27 @@ pub const Value = union(enum) {
         return switch (self) {
             .obj => |o| switch (o.kind) {
                 .string => true,
-                // else => false,
+                else => false,
+            },
+            else => false,
+        };
+    }
+
+    pub fn isFunction(self: Value) bool {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .function => true,
+                else => false,
+            },
+            else => false,
+        };
+    }
+
+    pub fn isNativeFunction(self: Value) bool {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .native_function => true,
+                else => false,
             },
             else => false,
         };
@@ -107,6 +148,8 @@ pub const Value = union(enum) {
 
 pub const ObjKind = enum {
     string,
+    function,
+    native_function,
 };
 
 pub const Obj = struct {
@@ -125,6 +168,27 @@ pub const Obj = struct {
                     // (std.mem.eql).
                     return o1 == o2;
                 },
+                else => return false,
+            },
+            .function => switch (other.kind) {
+                .function => {
+                    const o1 = self.as_obj_function_const();
+                    const o2 = other.as_obj_function_const();
+
+                    // Pointer equality.
+                    return o1 == o2;
+                },
+                else => return false,
+            },
+            .native_function => switch (other.kind) {
+                .native_function => {
+                    const o1 = self.as_obj_native_function_const();
+                    const o2 = other.as_obj_native_function_const();
+
+                    // Pointer equality.
+                    return o1 == o2;
+                },
+                else => return false,
             },
         }
     }
@@ -134,6 +198,13 @@ pub const Obj = struct {
             .string => {
                 const obj_string = self.as_obj_string_const();
                 std.debug.print("[object string '{s}']", .{obj_string.data});
+            },
+            .function => {
+                const name: []const u8 = self.as_obj_function_const().get_name();
+                std.debug.print("<fun {s}>", .{name});
+            },
+            .native_function => {
+                std.debug.print("<native fun>", .{});
             },
         }
     }
@@ -145,6 +216,7 @@ pub const Obj = struct {
                 const obj_string = self.as_obj_string_const();
                 std.debug.print("{s}", .{obj_string.data});
             },
+            else => self.show(),
         }
     }
 
@@ -156,12 +228,36 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    fn as_obj_function_mut(self: *Obj) *ObjFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    fn as_obj_function_const(self: *const Obj) *const ObjFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    fn as_obj_native_function_mut(self: *Obj) *ObjNativeFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    fn as_obj_native_function_const(self: *const Obj) *const ObjNativeFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     pub fn deinit(self: *Obj, allocator: std.mem.Allocator) void {
         switch (self.kind) {
             .string => {
                 const string = self.as_obj_string_mut();
                 defer allocator.free(string.data);
                 defer allocator.destroy(string);
+            },
+            .function => {
+                const func = self.as_obj_function_mut();
+                defer allocator.destroy(func);
+            },
+            .native_function => {
+                const native = self.as_obj_native_function_mut();
+                defer allocator.destroy(native);
             },
         }
     }
@@ -193,6 +289,71 @@ pub const ObjString = struct {
     }
 
     pub fn as_obj(self: *ObjString) *Obj {
+        return @ptrCast(self);
+    }
+};
+
+pub const ObjFunction = struct {
+    obj: Obj,
+    arity: usize,
+    chunk: Chunk,
+    name: ?*const ObjString,
+
+    pub fn createNew(allocator: std.mem.Allocator) !*ObjFunction {
+        const ptr = try allocator.create(ObjFunction);
+        ptr.* = .{
+            .obj = .{
+                .kind = .function,
+                .next = null,
+            },
+            .arity = 0,
+            .name = null,
+            .chunk = Chunk.init(),
+        };
+
+        return ptr;
+    }
+
+    pub fn get_name(self: *const ObjFunction) []const u8 {
+        return if (self.name) |str| blk: {
+            break :blk str.data;
+        } else blk: {
+            break :blk "script";
+        };
+    }
+
+    pub fn as_obj(self: *ObjFunction) *Obj {
+        return @ptrCast(self);
+    }
+};
+
+pub const NativeFunctionError = error{
+    OutOfMemory,
+    InvalidCharacter,
+};
+
+pub const NativeFunction = *const fn (arg_count: usize, args: []const Value) NativeFunctionError!Value;
+
+pub const ObjNativeFunction = struct {
+    obj: Obj,
+    function: NativeFunction,
+    arity: usize,
+
+    pub fn init(allocator: std.mem.Allocator, function: NativeFunction, arity: usize) !*ObjNativeFunction {
+        const ptr = try allocator.create(ObjNativeFunction);
+        ptr.* = .{
+            .obj = .{
+                .kind = .native_function,
+                .next = null,
+            },
+            .function = function,
+            .arity = arity,
+        };
+
+        return ptr;
+    }
+
+    pub fn as_obj(self: *ObjNativeFunction) *Obj {
         return @ptrCast(self);
     }
 };
