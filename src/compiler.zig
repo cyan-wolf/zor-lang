@@ -58,15 +58,17 @@ pub const FunctionCompiler = struct {
     enclosing: ?*FunctionCompiler,
 
     allocator: std.mem.Allocator,
+    alloc_monitor: *AllocMonitor,
 
-    pub fn init(allocator: std.mem.Allocator, func_kind: FunctionKind, enclosing: ?*FunctionCompiler) !FunctionCompiler {
+    pub fn init(allocator: std.mem.Allocator, alloc_monitor: *AllocMonitor, func_kind: FunctionKind, enclosing: ?*FunctionCompiler) !FunctionCompiler {
         return .{
             .locals_info = try LocalsInfo.init(allocator),
-            .curr_function = try ObjFunction.createNew(allocator),
+            .curr_function = try alloc_monitor.createFunction(),
             .curr_function_kind = func_kind,
             .enclosing = enclosing,
 
             .allocator = allocator,
+            .alloc_monitor = alloc_monitor,
         };
     }
 
@@ -150,7 +152,7 @@ pub const Compiler = struct {
 
     pub fn compile(self: *Compiler) !?*ObjFunction {
         // The top-level of the script is denoted by a special function of kind `script`.
-        var root_func_context = try FunctionCompiler.init(self.allocator, .script, null);
+        var root_func_context = try FunctionCompiler.init(self.allocator, self.alloc_monitor, .script, null);
         defer root_func_context.deinit();
 
         self.func_context = &root_func_context;
@@ -620,7 +622,7 @@ pub const Compiler = struct {
     }
 
     fn compileFunction(self: *Compiler, kind: FunctionKind) !void {
-        var nested_func_context = try FunctionCompiler.init(self.allocator, kind, self.func_context);
+        var nested_func_context = try FunctionCompiler.init(self.allocator, self.alloc_monitor, kind, self.func_context);
         defer nested_func_context.deinit();
 
         nested_func_context.curr_function.name = try self.alloc_monitor.createOrGetInternedObjString(self.parser.previous.text_ref);

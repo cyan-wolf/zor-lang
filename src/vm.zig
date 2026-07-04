@@ -70,6 +70,18 @@ pub const AllocMonitor = struct {
         return string;
     }
 
+    pub fn createFunction(self: *AllocMonitor) !*ObjFunction {
+        const func = try ObjFunction.initUntracked(self.allocator);
+        try self.registerAllocatedObj(func.as_obj());
+        return func;
+    }
+
+    pub fn createNativeFunction(self: *AllocMonitor, function: NativeFunction, arity: usize) !*ObjNativeFunction {
+        const native = try ObjNativeFunction.initUntracked(self.allocator, function, arity);
+        try self.registerAllocatedObj(native.as_obj());
+        return native;
+    }
+
     fn registerAllocatedObj(self: *AllocMonitor, obj: *Obj) !void {
         obj.next = self.objects;
         self.objects = obj;
@@ -78,12 +90,13 @@ pub const AllocMonitor = struct {
     pub fn deinit(self: *AllocMonitor) void {
         var curr = self.objects;
 
-        while (curr != null) {
-            defer curr.?.deinit(self.allocator);
-            curr = curr.?.next;
+        while (curr) |node| {
+            curr = node.next;
+            node.deinit(self.allocator);
         }
-        self.interned_strings.deinit();
+
         self.globals.deinit();
+        self.interned_strings.deinit();
     }
 };
 
@@ -437,7 +450,8 @@ pub const VM = struct {
         const func_name = try self.alloc_monitor.createOrGetInternedObjString(name);
         try self.push(Value.fromObj(func_name.as_obj()));
 
-        const native_function = try ObjNativeFunction.init(self.allocator, function, arity);
+        const native_function = try self.alloc_monitor.createNativeFunction(function, arity);
+
         const native_func_value = Value.fromObj(native_function.as_obj());
         try self.push(native_func_value);
 
@@ -455,5 +469,7 @@ pub const VM = struct {
         self.stack.deinit(self.allocator);
 
         self.compiler.?.deinit();
+
+        self.frames.deinit(self.allocator);
     }
 };
