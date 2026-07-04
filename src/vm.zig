@@ -78,9 +78,9 @@ pub const AllocMonitor = struct {
     pub fn deinit(self: *AllocMonitor) void {
         var curr = self.objects;
 
-        while (curr != null) {
-            defer curr.?.deinit(self.allocator);
-            curr = curr.?.next;
+        while (curr) |node| {
+            curr = node.next;
+            node.deinit(self.allocator);
         }
         self.interned_strings.deinit();
         self.globals.deinit();
