@@ -278,10 +278,10 @@ pub const VM = struct {
                 .opreturn => {
                     const result = self.pop();
 
-                    _ = self.frames.pop();
+                    const dead_frame = self.frames.pop();
+                    self.stack.items.len = dead_frame.?.stack_start_idx;
 
                     if (self.frames.items.len == 0) {
-                        _ = self.pop();
                         return;
                     }
 
