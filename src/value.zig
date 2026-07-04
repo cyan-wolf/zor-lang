@@ -248,16 +248,17 @@ pub const Obj = struct {
         switch (self.kind) {
             .string => {
                 const string = self.as_obj_string_mut();
-                defer allocator.free(string.data);
-                defer allocator.destroy(string);
+                allocator.free(string.data);
+                allocator.destroy(string);
             },
             .function => {
                 const func = self.as_obj_function_mut();
-                defer allocator.destroy(func);
+                func.chunk.deinit(allocator);
+                allocator.destroy(func);
             },
             .native_function => {
                 const native = self.as_obj_native_function_mut();
-                defer allocator.destroy(native);
+                allocator.destroy(native);
             },
         }
     }
@@ -268,9 +269,9 @@ pub const ObjString = struct {
     data: []const u8,
     hash: u64,
 
-    // Used for allocating string literals onto the heap.
-    // WARNING: Do not use this method directly as it creates uninterned strings.
-    // Instead create interned strings using the Allocation Monitor type on the VM.
+    /// Used for allocating strings onto the heap.
+    /// WARNING: Do not use this method directly as it creates uninterned strings.
+    /// Instead create interned strings using the Allocation Monitor type on the VM.
     pub fn cloneStringnUninterned(allocator: std.mem.Allocator, string_data: []const u8) !*ObjString {
         // Defensively copy the data.
         const new_string_data = try allocator.dupe(u8, string_data);
@@ -299,7 +300,8 @@ pub const ObjFunction = struct {
     chunk: Chunk,
     name: ?*const ObjString,
 
-    pub fn createNew(allocator: std.mem.Allocator) !*ObjFunction {
+    /// NOTE: Do not call this method directly, use `AllocMonitor.createFunction` instead.
+    pub fn initUntracked(allocator: std.mem.Allocator) !*ObjFunction {
         const ptr = try allocator.create(ObjFunction);
         ptr.* = .{
             .obj = .{
@@ -339,7 +341,8 @@ pub const ObjNativeFunction = struct {
     function: NativeFunction,
     arity: usize,
 
-    pub fn init(allocator: std.mem.Allocator, function: NativeFunction, arity: usize) !*ObjNativeFunction {
+    /// NOTE: Do not call this method directly, use `AllocMonitor.createNativeFunction` instead.
+    pub fn initUntracked(allocator: std.mem.Allocator, function: NativeFunction, arity: usize) !*ObjNativeFunction {
         const ptr = try allocator.create(ObjNativeFunction);
         ptr.* = .{
             .obj = .{
