@@ -1,6 +1,6 @@
 const value_mod = @import("value.zig");
 const Value = value_mod.Value;
-const ObjFunction = value_mod.ObjFunction;
+const ObjFunction = @import("obj.zig").ObjFunction;
 
 pub const CallFrame = struct {
     function: *ObjFunction,
