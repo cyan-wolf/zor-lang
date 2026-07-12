@@ -1,6 +1,7 @@
 const std = @import("std");
 const hashString = @import("table.zig").hashString;
 const Chunk = @import("chunk.zig").Chunk;
+const AllocMonitor = @import("vm.zig").AllocMonitor;
 
 pub const Value = union(enum) {
     number: f64,
@@ -142,6 +143,17 @@ pub const Value = union(enum) {
         switch (self) {
             .obj => |o| o.show_pretty(),
             else => self.show(),
+        }
+    }
+
+    pub fn getTypeString(self: Value) []const u8 {
+        switch (self) {
+            .obj => |o| {
+                return @tagName(o.kind);
+            },
+            else => {
+                return @tagName(self);
+            },
         }
     }
 };
@@ -334,7 +346,7 @@ pub const NativeFunctionError = error{
     InvalidCharacter,
 };
 
-pub const NativeFunction = *const fn (arg_count: usize, args: []const Value) NativeFunctionError!Value;
+pub const NativeFunction = *const fn (arg_count: usize, args: []const Value, alloc_monitor: *AllocMonitor) NativeFunctionError!Value;
 
 pub const ObjNativeFunction = struct {
     obj: Obj,
