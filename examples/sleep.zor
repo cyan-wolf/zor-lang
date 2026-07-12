@@ -1,0 +1,24 @@
+
+fun sleep(duration) {
+    var MILLIS_IN_SECS = 1000;
+    var start = clock();
+    var elapsed = 0;
+
+    while (elapsed < duration * MILLIS_IN_SECS) {
+        var c = clock();
+        elapsed = c - start;
+    }
+}
+
+var SECS = 10;
+
+for var i = 0; i < SECS; i = i + 1 {
+    sleep(1);
+
+    print "Iteration: ";
+    print i + 1;
+    print "";
+
+    print "1 second has passed";
+    print "";
+}

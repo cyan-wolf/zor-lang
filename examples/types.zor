@@ -1,0 +1,16 @@
+
+// === Primitives ===
+print type(45);
+print type(nil);
+print type(true);
+
+// === Objects ===
+
+fun hello_world() {
+    return "Hello World";
+}
+
+print type("Hello World");
+print type(hello_world);
+print type(clock);
+

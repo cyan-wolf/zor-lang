@@ -127,6 +127,7 @@ pub const VM = struct {
         };
 
         try self.defineNative("clock", native_functions.nativeFunctionClock, 0);
+        try self.defineNative("type", native_functions.nativeFunctionGetType, 1);
 
         return self;
     }
@@ -171,8 +172,11 @@ pub const VM = struct {
             if (native_function.arity != arg_count) {
                 try self.reportRuntimeError("Wrong number of arguments.");
             }
-            const args = self.stack.items[self.stack.items.len - arg_count - 1 ..];
-            const res = try native_function.function(arg_count, args);
+            const args = self.stack.items[self.stack.items.len - arg_count ..];
+            const res = try native_function.function(arg_count, args, &self.alloc_monitor);
+
+            // Clean up: pop the arguments AND the native function object off the stack
+            self.stack.items.len -= (arg_count + 1);
 
             try self.push(res);
         } else {
