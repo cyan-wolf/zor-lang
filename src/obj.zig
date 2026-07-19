@@ -7,6 +7,7 @@ const Value = @import("value.zig").Value;
 pub const ObjKind = enum {
     string,
     function,
+    closure,
     native_function,
 };
 
@@ -38,6 +39,16 @@ pub const Obj = struct {
                 },
                 else => return false,
             },
+            .closure => switch (other.kind) {
+                .closure => {
+                    const o1 = self.as_obj_closure_const();
+                    const o2 = other.as_obj_closure_const();
+
+                    // Pointer equality.
+                    return o1 == o2;
+                },
+                else => return false,
+            },
             .native_function => switch (other.kind) {
                 .native_function => {
                     const o1 = self.as_obj_native_function_const();
@@ -60,6 +71,11 @@ pub const Obj = struct {
             .function => {
                 const name: []const u8 = self.as_obj_function_const().get_name();
                 std.debug.print("<fun {s}>", .{name});
+            },
+            .closure => {
+                const func = self.as_obj_closure_const().function;
+                // Defers to the `.show()` impl for .kind == .function.
+                func.as_obj().show();
             },
             .native_function => {
                 std.debug.print("<native fun>", .{});
@@ -94,6 +110,14 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    pub fn as_obj_closure_mut(self: *Obj) *ObjClosure {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub fn as_obj_closure_const(self: *const Obj) *const ObjClosure {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     pub fn as_obj_native_function_mut(self: *Obj) *ObjNativeFunction {
         return @alignCast(@fieldParentPtr("obj", self));
     }
@@ -113,6 +137,12 @@ pub const Obj = struct {
                 const func = self.as_obj_function_mut();
                 func.chunk.deinit(allocator);
                 allocator.destroy(func);
+            },
+            .closure => {
+                const closure = self.as_obj_closure_mut();
+                // We do not deinit the function this closure points to.
+                // Closures do not own their backing function.
+                allocator.destroy(closure);
             },
             .native_function => {
                 const native = self.as_obj_native_function_mut();
@@ -183,6 +213,29 @@ pub const ObjFunction = struct {
     }
 
     pub fn as_obj(self: *ObjFunction) *Obj {
+        return @ptrCast(self);
+    }
+};
+
+pub const ObjClosure = struct {
+    obj: Obj,
+    function: *ObjFunction,
+
+    /// NOTE: Do not call this method directly, use `AllocMonitor.createClosure` instead.
+    pub fn initUntracked(allocator: std.mem.Allocator, function: *ObjFunction) !*ObjClosure {
+        const ptr = try allocator.create(ObjClosure);
+        ptr.* = .{
+            .obj = .{
+                .kind = .closure,
+                .next = null,
+            },
+            .function = function,
+        };
+
+        return ptr;
+    }
+
+    pub fn as_obj(self: *ObjClosure) *Obj {
         return @ptrCast(self);
     }
 };

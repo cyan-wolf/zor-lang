@@ -6,6 +6,7 @@ const obj_mod = @import("obj.zig");
 const Obj = obj_mod.Obj;
 const ObjString = obj_mod.ObjString;
 const ObjFunction = obj_mod.ObjFunction;
+const ObjClosure = obj_mod.ObjClosure;
 const ObjNativeFunction = obj_mod.ObjNativeFunction;
 
 pub const Value = union(enum) {
@@ -64,6 +65,16 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn asClosure(self: Value) *ObjClosure {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .closure => o.as_obj_closure_mut(),
+                else => unreachable,
+            },
+            else => unreachable,
+        };
+    }
+
     pub fn asNativeFunction(self: Value) *ObjNativeFunction {
         return switch (self) {
             .obj => |o| switch (o.kind) {
@@ -88,6 +99,16 @@ pub const Value = union(enum) {
         return switch (self) {
             .obj => |o| switch (o.kind) {
                 .function => true,
+                else => false,
+            },
+            else => false,
+        };
+    }
+
+    pub fn isClosure(self: Value) bool {
+        return switch (self) {
+            .obj => |o| switch (o.kind) {
+                .closure => true,
                 else => false,
             },
             else => false,

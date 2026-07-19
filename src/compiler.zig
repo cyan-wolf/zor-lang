@@ -661,7 +661,7 @@ pub const Compiler = struct {
         // Restore enclosing context.
         self.func_context = parent_func_context;
 
-        try self.emitCodeAndOperand(.constant, try self.makeConstant(Value.fromObj(function.as_obj())));
+        try self.emitCodeAndOperand(.closure, try self.makeConstant(Value.fromObj(function.as_obj())));
     }
 
     fn and_(self: *Compiler, _: ParseContext) !void {
