@@ -29,3 +29,8 @@ pub const LocalsInfo = struct {
         self.locals.deinit(allocator);
     }
 };
+
+pub const Upvalue = struct {
+    idx: usize,
+    is_local: bool,
+};

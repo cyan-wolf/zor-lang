@@ -8,6 +8,7 @@ pub const ObjKind = enum {
     string,
     function,
     closure,
+    upvalue,
     native_function,
 };
 
@@ -49,6 +50,7 @@ pub const Obj = struct {
                 },
                 else => return false,
             },
+            .upvalue => unreachable,
             .native_function => switch (other.kind) {
                 .native_function => {
                     const o1 = self.as_obj_native_function_const();
@@ -76,6 +78,9 @@ pub const Obj = struct {
                 const func = self.as_obj_closure_const().function;
                 // Defers to the `.show()` impl for .kind == .function.
                 func.as_obj().show();
+            },
+            .upvalue => {
+                std.debug.print("{{upvalue}}", .{}); // unreachable code
             },
             .native_function => {
                 std.debug.print("<native fun>", .{});
@@ -118,6 +123,14 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    pub fn as_obj_upvalue_mut(self: *Obj) *ObjUpvalue {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub fn as_obj_upvalue_const(self: *const Obj) *const ObjUpvalue {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     pub fn as_obj_native_function_mut(self: *Obj) *ObjNativeFunction {
         return @alignCast(@fieldParentPtr("obj", self));
     }
@@ -140,9 +153,16 @@ pub const Obj = struct {
             },
             .closure => {
                 const closure = self.as_obj_closure_mut();
+
+                closure.upvalues.deinit(allocator);
                 // We do not deinit the function this closure points to.
                 // Closures do not own their backing function.
                 allocator.destroy(closure);
+            },
+            .upvalue => {
+                const upvalue = self.as_obj_upvalue_mut();
+
+                allocator.destroy(upvalue);
             },
             .native_function => {
                 const native = self.as_obj_native_function_mut();
@@ -188,6 +208,8 @@ pub const ObjFunction = struct {
     chunk: Chunk,
     name: ?*const ObjString,
 
+    upvalue_count: usize,
+
     /// NOTE: Do not call this method directly, use `AllocMonitor.createFunction` instead.
     pub fn initUntracked(allocator: std.mem.Allocator) !*ObjFunction {
         const ptr = try allocator.create(ObjFunction);
@@ -199,6 +221,8 @@ pub const ObjFunction = struct {
             .arity = 0,
             .name = null,
             .chunk = Chunk.init(),
+
+            .upvalue_count = 0,
         };
 
         return ptr;
@@ -220,22 +244,52 @@ pub const ObjFunction = struct {
 pub const ObjClosure = struct {
     obj: Obj,
     function: *ObjFunction,
+    upvalues: std.ArrayList(?*ObjUpvalue),
 
     /// NOTE: Do not call this method directly, use `AllocMonitor.createClosure` instead.
     pub fn initUntracked(allocator: std.mem.Allocator, function: *ObjFunction) !*ObjClosure {
         const ptr = try allocator.create(ObjClosure);
+
+        // Fill with `null` to avoid GC issues.
+        var upvalues: std.ArrayList(?*ObjUpvalue) = .empty;
+        try upvalues.appendNTimes(allocator, null, function.upvalue_count);
+
         ptr.* = .{
             .obj = .{
                 .kind = .closure,
                 .next = null,
             },
             .function = function,
+            .upvalues = upvalues,
         };
 
         return ptr;
     }
 
     pub fn as_obj(self: *ObjClosure) *Obj {
+        return @ptrCast(self);
+    }
+};
+
+pub const ObjUpvalue = struct {
+    obj: Obj,
+    location: *Value,
+
+    /// NOTE: Do not call this method directly, use `AllocMonitor.createUpvalue` instead.
+    pub fn initUntracked(allocator: std.mem.Allocator, location: *Value) !*ObjUpvalue {
+        const ptr = try allocator.create(ObjUpvalue);
+        ptr.* = .{
+            .obj = .{
+                .kind = .upvalue,
+                .next = null,
+            },
+            .location = location,
+        };
+
+        return ptr;
+    }
+
+    pub fn as_obj(self: *ObjUpvalue) *Obj {
         return @ptrCast(self);
     }
 };

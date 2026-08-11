@@ -11,6 +11,7 @@ const Obj = obj_mod.Obj;
 const ObjString = obj_mod.ObjString;
 const ObjFunction = obj_mod.ObjFunction;
 const ObjClosure = obj_mod.ObjClosure;
+const ObjUpvalue = obj_mod.ObjUpvalue;
 const ObjNativeFunction = obj_mod.ObjNativeFunction;
 const NativeFunction = obj_mod.NativeFunction;
 const table_mod = @import("table.zig");
@@ -82,6 +83,12 @@ pub const AllocMonitor = struct {
         const closure = try ObjClosure.initUntracked(self.allocator, function);
         try self.registerAllocatedObj(closure.as_obj());
         return closure;
+    }
+
+    pub fn createUpvalue(self: *AllocMonitor, local: *Value) !*ObjUpvalue {
+        const upvalue = try ObjUpvalue.initUntracked(self.allocator, local);
+        try self.registerAllocatedObj(upvalue.as_obj());
+        return upvalue;
     }
 
     pub fn createNativeFunction(self: *AllocMonitor, function: NativeFunction, arity: usize) !*ObjNativeFunction {
@@ -214,6 +221,11 @@ pub const VM = struct {
             .stack_start_idx = self.stack.items.len - arg_count - 1,
         };
         try self.frames.append(self.allocator, frame);
+    }
+
+    fn captureUpvalue(self: *VM, local_ptr: *Value) !*ObjUpvalue {
+        const upval = try self.alloc_monitor.createUpvalue(local_ptr);
+        return upval;
     }
 
     fn readByte(self: *VM) CodeContent {
@@ -414,6 +426,31 @@ pub const VM = struct {
                     const func = self.readConstant().asFunction();
                     const closure = try self.alloc_monitor.createClosure(func);
                     try self.push(Value.fromObj(closure.as_obj()));
+
+                    for (0..closure.upvalues.items.len) |i| {
+                        const is_local = (self.readByte() == 1);
+                        const upval_idx = self.readByte();
+
+                        if (is_local) {
+                            const local_idx = self.curr_frame.stack_start_idx + upval_idx;
+                            // LIFETIMES...
+                            const local_ptr: *Value = &self.stack.items[local_idx];
+                            closure.upvalues.items[i] = try self.captureUpvalue(local_ptr);
+                        } else {
+                            closure.upvalues.items[i] = self.curr_frame.closure.upvalues.items[upval_idx];
+                        }
+                    }
+                },
+                .get_upvalue => {
+                    const slot: usize = self.readByte();
+                    const local = self.curr_frame.closure.upvalues.items[slot].?.location;
+                    try self.push(local.*); // clone the local (from the pointer) onto the VM stack
+                },
+                .set_upvalue => {
+                    const slot = self.readByte();
+
+                    // LIFETIMES...
+                    self.curr_frame.closure.upvalues.items[slot].?.location.* = self.peek(0);
                 },
             }
         }
