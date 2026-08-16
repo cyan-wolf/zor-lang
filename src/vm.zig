@@ -143,6 +143,10 @@ pub const VM = struct {
             .compiler = null,
         };
 
+        // 256 * 256 = 65536
+        const stack_capacity = try std.math.powi(usize, std.math.maxInt(u8), 2);
+        try self.stack.ensureTotalCapacity(allocator, stack_capacity);
+
         try self.defineNative("clock", native_functions.nativeFunctionClock, 0);
         try self.defineNative("type", native_functions.nativeFunctionGetType, 1);
 
@@ -259,7 +263,7 @@ pub const VM = struct {
             head_upval.closed_over_value = head_upval.location.*;
 
             // Self-referential pointer to the object's own field (O_O).
-            head_upval.location = &head_upval.closed_over_value.?;
+            head_upval.location = &head_upval.closed_over_value;
 
             // `head_upval` is no longer closed so we remove it from the list
             // of open up-values.
@@ -346,8 +350,9 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
+                    const slot_ptr = &self.stack.items.ptr[self.curr_frame.stack_start_idx];
                     const result = self.pop();
-                    self.closeUpvalues(&self.stack.items[self.curr_frame.stack_start_idx]);
+                    self.closeUpvalues(slot_ptr);
 
                     const dead_frame = self.frames.pop();
                     self.stack.items.len = dead_frame.?.stack_start_idx;
