@@ -1,0 +1,92 @@
+
+fun vector(x, y) {
+
+    fun get_x() {
+        return x;
+    }
+
+    fun get_y() {
+        return y;
+    }
+
+    fun set_x(x_new) {
+        x = x_new;
+    }
+
+    fun set_y(y_new) {
+        y = y_new;
+    }
+
+    fun add(other) {
+        var dx = x + other("x")();
+        var dy = y + other("y")();
+
+        return vector(dx, dy);
+    }
+
+    fun attr(method_name) {
+        if method_name == "x" {
+            return get_x;
+        }
+        else {
+            if method_name == "y" {
+                return get_y;
+            }
+            else {
+                if method_name == "add" {
+                    return add;
+                }
+                else {
+                    if method_name == "set_x" {
+                        return set_x;
+                    }
+                    else {
+                        if method_name == "set_y" {
+                            return set_y;
+                        }
+                        else {
+                            return nil;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return attr;
+}
+
+var v1 = vector(1, 2);
+var v2 = vector(3, 4);
+
+print "Vector 1";
+print v1("x")();
+print v1("y")();
+print "";
+
+print "Vector 2";
+print v2("x")();
+print v2("y")();
+print "";
+
+// Change vector 1.
+v1("set_x")(100);
+v1("set_y")(200);
+
+print "Modified Vector 1";
+print v1("x")();
+print v1("y")();
+print "";
+
+print "(Unmodified) Vector 2";
+print v2("x")();
+print v2("y")();
+print "";
+
+// Add the vectors.
+var v3 = v1("add")(v2);
+
+print "Vector 3 = Vector 1 + Vector 2";
+print v3("x")();
+print v3("y")();
+print "";

@@ -6,11 +6,14 @@ const CodeContent = chunk_mod.CodeContent;
 const OpCode = chunk_mod.OpCode;
 const value_mod = @import("value.zig");
 const Value = value_mod.Value;
-const Obj = value_mod.Obj;
-const ObjString = value_mod.ObjString;
-const ObjFunction = value_mod.ObjFunction;
-const ObjNativeFunction = value_mod.ObjNativeFunction;
-const NativeFunction = value_mod.NativeFunction;
+const obj_mod = @import("obj.zig");
+const Obj = obj_mod.Obj;
+const ObjString = obj_mod.ObjString;
+const ObjFunction = obj_mod.ObjFunction;
+const ObjClosure = obj_mod.ObjClosure;
+const ObjUpvalue = obj_mod.ObjUpvalue;
+const ObjNativeFunction = obj_mod.ObjNativeFunction;
+const NativeFunction = obj_mod.NativeFunction;
 const table_mod = @import("table.zig");
 const TableContext = table_mod.TableContext;
 const StringPoolContext = table_mod.StringPoolContext;
@@ -38,6 +41,7 @@ pub const InterpretError = error{
 
 pub const AllocMonitor = struct {
     objects: ?*Obj,
+    open_upvalues: ?*ObjUpvalue,
     interned_strings: StringPool,
     globals: Table,
     table_context: TableContext,
@@ -47,6 +51,7 @@ pub const AllocMonitor = struct {
     pub fn init(allocator: std.mem.Allocator) AllocMonitor {
         return .{
             .objects = null,
+            .open_upvalues = null,
             .interned_strings = StringPool.init(allocator),
             .globals = Table.init(allocator),
             .table_context = .{},
@@ -74,6 +79,18 @@ pub const AllocMonitor = struct {
         const func = try ObjFunction.initUntracked(self.allocator);
         try self.registerAllocatedObj(func.as_obj());
         return func;
+    }
+
+    pub fn createClosure(self: *AllocMonitor, function: *ObjFunction) !*ObjClosure {
+        const closure = try ObjClosure.initUntracked(self.allocator, function);
+        try self.registerAllocatedObj(closure.as_obj());
+        return closure;
+    }
+
+    pub fn createUpvalue(self: *AllocMonitor, local: *Value) !*ObjUpvalue {
+        const upvalue = try ObjUpvalue.initUntracked(self.allocator, local);
+        try self.registerAllocatedObj(upvalue.as_obj());
+        return upvalue;
     }
 
     pub fn createNativeFunction(self: *AllocMonitor, function: NativeFunction, arity: usize) !*ObjNativeFunction {
@@ -126,6 +143,10 @@ pub const VM = struct {
             .compiler = null,
         };
 
+        // 256 * 256 = 65536
+        const stack_capacity = try std.math.powi(usize, std.math.maxInt(u8), 2);
+        try self.stack.ensureTotalCapacity(allocator, stack_capacity);
+
         try self.defineNative("clock", native_functions.nativeFunctionClock, 0);
         try self.defineNative("type", native_functions.nativeFunctionGetType, 1);
 
@@ -140,8 +161,14 @@ pub const VM = struct {
         if (func) |function| {
             try self.push(Value.fromObj(function.as_obj()));
 
+            const closure = try self.alloc_monitor.createClosure(function);
+
+            // GC hacks
+            _ = self.pop();
+            try self.push(Value.fromObj(closure.as_obj()));
+
             // Here, `function` is the top level of the script, so we call it.
-            try self.call(function, 0);
+            try self.call(closure, 0);
 
             try self.run();
         } else {
@@ -162,9 +189,8 @@ pub const VM = struct {
     }
 
     fn callValue(self: *VM, callee: Value, arg_count: usize) !void {
-        if (callee.isFunction()) {
-            const function = callee.asFunction();
-            try self.call(function, arg_count);
+        if (callee.isClosure()) {
+            try self.call(callee.asClosure(), arg_count);
         } else if (callee.isNativeFunction()) {
             // TODO: extract this native function calling logic to a separate helper.
             const native_function = callee.asNativeFunction();
@@ -184,7 +210,9 @@ pub const VM = struct {
         }
     }
 
-    fn call(self: *VM, function: *ObjFunction, arg_count: usize) !void {
+    fn call(self: *VM, closure: *ObjClosure, arg_count: usize) !void {
+        const function = closure.function;
+
         if (arg_count != function.arity) {
             try self.reportRuntimeError("Wrong number of arguments.");
         }
@@ -194,21 +222,63 @@ pub const VM = struct {
         }
 
         const frame: CallFrame = .{
-            .function = function,
+            .closure = closure,
             .ip = 0,
             .stack_start_idx = self.stack.items.len - arg_count - 1,
         };
         try self.frames.append(self.allocator, frame);
     }
 
+    fn captureUpvalue(self: *VM, local_ptr: *Value) !*ObjUpvalue {
+        var prev_upval: ?*ObjUpvalue = null;
+        var upval = self.alloc_monitor.open_upvalues;
+
+        while (upval != null and @intFromPtr(upval.?.location) > @intFromPtr(local_ptr)) {
+            prev_upval = upval;
+            upval = upval.?.next;
+        }
+
+        if (upval != null and upval.?.location == local_ptr) {
+            return upval.?;
+        } else {
+            const new_upval = try self.alloc_monitor.createUpvalue(local_ptr);
+            new_upval.next = upval;
+
+            if (prev_upval) |prev| {
+                prev.next = new_upval;
+            } else {
+                self.alloc_monitor.open_upvalues = new_upval;
+            }
+            return new_upval;
+        }
+    }
+
+    fn closeUpvalues(self: *VM, last_location_ptr: *Value) void {
+        while (self.alloc_monitor.open_upvalues) |open_upvals| {
+            if (@intFromPtr(open_upvals.location) < @intFromPtr(last_location_ptr)) {
+                break;
+            }
+            const head_upval = open_upvals;
+            // Copy the location pointer to the heap.
+            head_upval.closed_over_value = head_upval.location.*;
+
+            // Self-referential pointer to the object's own field (O_O).
+            head_upval.location = &head_upval.closed_over_value;
+
+            // `head_upval` is no longer closed so we remove it from the list
+            // of open up-values.
+            self.alloc_monitor.open_upvalues = head_upval.next;
+        }
+    }
+
     fn readByte(self: *VM) CodeContent {
-        const content = self.curr_frame.function.chunk.code.items[self.curr_frame.ip];
+        const content = self.curr_frame.closure.function.chunk.code.items[self.curr_frame.ip];
         self.curr_frame.ip += 1;
         return content;
     }
 
     fn readU16(self: *VM) u16 {
-        const content = std.mem.readInt(u16, self.curr_frame.function.chunk.code.items[self.curr_frame.ip..][0..2], .big);
+        const content = std.mem.readInt(u16, self.curr_frame.closure.function.chunk.code.items[self.curr_frame.ip..][0..2], .big);
         self.curr_frame.ip += 2;
         return content;
     }
@@ -220,7 +290,7 @@ pub const VM = struct {
 
     fn readConstant(self: *VM) Value {
         const constantIdx = self.readByte();
-        return self.curr_frame.function.chunk.constants.items[constantIdx];
+        return self.curr_frame.closure.function.chunk.constants.items[constantIdx];
     }
 
     inline fn binaryOp(self: *VM, comptime op: enum { add, sub, mul, div, less, greater }) !void {
@@ -271,7 +341,7 @@ pub const VM = struct {
                 std.debug.print("\n", .{});
 
                 // Print the current instruction.
-                _ = self.curr_frame.function.chunk.disassembleInstruction(self.curr_frame.ip);
+                _ = self.curr_frame.closure.function.chunk.disassembleInstruction(self.curr_frame.ip);
             }
 
             // The instruction pointer should always end up pointing to
@@ -280,7 +350,9 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
+                    const slot_ptr = &self.stack.items.ptr[self.curr_frame.stack_start_idx];
                     const result = self.pop();
+                    self.closeUpvalues(slot_ptr);
 
                     const dead_frame = self.frames.pop();
                     self.stack.items.len = dead_frame.?.stack_start_idx;
@@ -395,6 +467,40 @@ pub const VM = struct {
                     // NOTE: self referential struct (!!!) - use indices for curr_frame if lifetimes get bad.
                     self.curr_frame = &self.frames.items[self.frames.items.len - 1];
                 },
+                .closure => {
+                    const func = self.readConstant().asFunction();
+                    const closure = try self.alloc_monitor.createClosure(func);
+                    try self.push(Value.fromObj(closure.as_obj()));
+
+                    for (0..closure.upvalues.items.len) |i| {
+                        const is_local = (self.readByte() == 1);
+                        const upval_idx = self.readByte();
+
+                        if (is_local) {
+                            const local_idx = self.curr_frame.stack_start_idx + upval_idx;
+                            // LIFETIMES...
+                            const local_ptr: *Value = &self.stack.items[local_idx];
+                            closure.upvalues.items[i] = try self.captureUpvalue(local_ptr);
+                        } else {
+                            closure.upvalues.items[i] = self.curr_frame.closure.upvalues.items[upval_idx];
+                        }
+                    }
+                },
+                .get_upvalue => {
+                    const slot: usize = self.readByte();
+                    const local = self.curr_frame.closure.upvalues.items[slot].?.location;
+                    try self.push(local.*); // clone the local (from the pointer) onto the VM stack
+                },
+                .set_upvalue => {
+                    const slot = self.readByte();
+
+                    // LIFETIMES...
+                    self.curr_frame.closure.upvalues.items[slot].?.location.* = self.peek(0);
+                },
+                .close_upvalue => {
+                    self.closeUpvalues(&self.stack.items[self.stack.items.len - 1]);
+                    _ = self.pop();
+                },
             }
         }
     }
@@ -431,7 +537,7 @@ pub const VM = struct {
 
     fn reportRuntimeError(self: *VM, message: []const u8) !void {
         const instructionIdx = self.curr_frame.ip;
-        const line = self.curr_frame.function.chunk.lines.items[instructionIdx];
+        const line = self.curr_frame.closure.function.chunk.lines.items[instructionIdx];
 
         std.debug.print("{s} [line {d}] in script\n", .{ message, line });
 
@@ -439,7 +545,7 @@ pub const VM = struct {
         std.debug.print("Stack Trace:\n", .{});
         for (0..self.frames.items.len) |i| {
             const frame = &self.frames.items[self.frames.items.len - i - 1];
-            const function = frame.function;
+            const function = frame.closure.function;
 
             std.debug.print("| {s}(...)\n", .{function.get_name()});
         }

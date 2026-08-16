@@ -4,6 +4,7 @@ const Token = @import("token.zig").Token;
 pub const Local = struct {
     name: Token,
     depth: ?usize,
+    is_captured: bool,
 };
 
 pub const LocalsInfo = struct {
@@ -16,6 +17,7 @@ pub const LocalsInfo = struct {
         const local_var_slot_used_by_vm: Local = .{
             .depth = 0,
             .name = .createDummyInitialToken(),
+            .is_captured = false,
         };
 
         try locals.append(allocator, local_var_slot_used_by_vm);
@@ -28,4 +30,9 @@ pub const LocalsInfo = struct {
     pub fn deinit(self: *LocalsInfo, allocator: std.mem.Allocator) void {
         self.locals.deinit(allocator);
     }
+};
+
+pub const Upvalue = struct {
+    idx: usize,
+    is_local: bool,
 };

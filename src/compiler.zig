@@ -6,9 +6,10 @@ const OpCode = chunk_mod.OpCode;
 const CodeContent = chunk_mod.CodeContent;
 const value_mod = @import("value.zig");
 const Value = value_mod.Value;
-const Obj = value_mod.Obj;
-const ObjFunction = value_mod.ObjFunction;
-const ObjString = value_mod.ObjString;
+const obj_mod = @import("obj.zig");
+const Obj = obj_mod.Obj;
+const ObjFunction = obj_mod.ObjFunction;
+const ObjString = obj_mod.ObjString;
 const token_mod = @import("token.zig");
 const Token = token_mod.Token;
 const TokenKind = token_mod.TokenKind;
@@ -19,7 +20,9 @@ const ParseRule = precedence_mod.ParseRule;
 const vm_mod = @import("vm.zig");
 const AllocMonitor = vm_mod.AllocMonitor;
 const ZorConfig = vm_mod.ZorConfig;
-const LocalsInfo = @import("locals.zig").LocalsInfo;
+const locals_mod = @import("locals.zig");
+const LocalsInfo = locals_mod.LocalsInfo;
+const Upvalue = locals_mod.Upvalue;
 
 const OpPair = struct {
     get: OpCode,
@@ -52,6 +55,8 @@ pub const FunctionCompiler = struct {
     curr_function: *ObjFunction,
     curr_function_kind: FunctionKind,
 
+    upvalues: std.ArrayList(Upvalue),
+
     // NOTE: This pointer has really bad lifecyle semantics, it might be better to allocate all the
     // `FunctionCompiler`s in an arena managed by the `Compiler` and instead `enclosing` refers to function-compilers
     // by index instead of by pointer.
@@ -60,20 +65,87 @@ pub const FunctionCompiler = struct {
     allocator: std.mem.Allocator,
     alloc_monitor: *AllocMonitor,
 
+    had_error: bool,
+
     pub fn init(allocator: std.mem.Allocator, alloc_monitor: *AllocMonitor, func_kind: FunctionKind, enclosing: ?*FunctionCompiler) !FunctionCompiler {
         return .{
             .locals_info = try LocalsInfo.init(allocator),
             .curr_function = try alloc_monitor.createFunction(),
             .curr_function_kind = func_kind,
+
+            .upvalues = .empty,
+
             .enclosing = enclosing,
 
             .allocator = allocator,
             .alloc_monitor = alloc_monitor,
+
+            .had_error = false,
         };
+    }
+
+    pub fn resolveLocal(self: *FunctionCompiler, name: Token) ?usize {
+        var i: usize = self.locals_info.locals.items.len;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals_info.locals.items[i];
+
+            // Return the local's index if the requested name matches.
+            // We need to compare the strings by value since these are pointers into
+            // the original source string, rather than interned strings that we can
+            // compare by pointer.
+            if (std.mem.eql(u8, name.text_ref, local.name.text_ref)) {
+                if (local.depth == null) {
+                    self.markError("Cannot read local variable in its own initialzer.");
+                    // Should we return here?
+                }
+
+                return i;
+            }
+        }
+        return null;
+    }
+
+    pub fn resolveUpvalue(self: *FunctionCompiler, name: Token) !?usize {
+        if (self.enclosing) |enclosing| {
+            if (enclosing.resolveLocal(name)) |local_idx| {
+                enclosing.locals_info.locals.items[local_idx].is_captured = true;
+                return try self.addUpvalue(local_idx, true);
+            }
+
+            if (try enclosing.resolveUpvalue(name)) |upval_idx| {
+                return try self.addUpvalue(upval_idx, false);
+            }
+        }
+
+        return null;
+    }
+
+    fn addUpvalue(self: *FunctionCompiler, idx: usize, is_local: bool) !usize {
+        // Find a preexisting upvalue for `idx` and return it instead of creating a new one.
+        for (self.upvalues.items, 0..) |u, i| {
+            if (u.idx == idx and u.is_local == is_local) {
+                return i;
+            }
+        }
+
+        const upval = Upvalue{
+            .idx = idx,
+            .is_local = is_local,
+        };
+        try self.upvalues.append(self.allocator, upval);
+        self.curr_function.upvalue_count += 1;
+        return self.upvalues.items.len - 1;
+    }
+
+    fn markError(self: *FunctionCompiler, message: []const u8) void {
+        std.debug.print("{s}\n", .{message});
+        self.had_error = true;
     }
 
     pub fn deinit(self: *FunctionCompiler) void {
         self.locals_info.deinit(self.allocator);
+        self.upvalues.deinit(self.allocator);
     }
 };
 
@@ -423,6 +495,9 @@ pub const Compiler = struct {
             try self.expressionStatement();
         }
 
+        if (self.func_context.had_error) {
+            self.markError("Unexpected error while compiling a function");
+        }
         if (self.parser.in_panic_mode) {
             self.synchronize();
         }
@@ -483,6 +558,7 @@ pub const Compiler = struct {
             .name = name,
             // null represents uninitialized
             .depth = null,
+            .is_captured = false,
         });
     }
 
@@ -595,7 +671,14 @@ pub const Compiler = struct {
             const next_local = self.func_context.locals_info.locals.getLast();
 
             if (next_local.depth != null and next_local.depth.? > self.func_context.locals_info.scope_depth) {
-                try self.emitCode(.pop);
+                const latest_var_idx = self.func_context.locals_info.locals.items.len - 1;
+                const latest_var_was_captured = self.func_context.locals_info.locals.items[latest_var_idx].is_captured;
+
+                if (latest_var_was_captured) {
+                    try self.emitCode(.close_upvalue);
+                } else {
+                    try self.emitCode(.pop);
+                }
                 _ = self.func_context.locals_info.locals.pop();
             } else {
                 break;
@@ -660,7 +743,13 @@ pub const Compiler = struct {
         // Restore enclosing context.
         self.func_context = parent_func_context;
 
-        try self.emitCodeAndOperand(.constant, try self.makeConstant(Value.fromObj(function.as_obj())));
+        try self.emitCodeAndOperand(.closure, try self.makeConstant(Value.fromObj(function.as_obj())));
+
+        // Encode the found upvalues as a variable length encoding.
+        for (nested_func_context.upvalues.items) |upvalue| {
+            try self.emitByte(if (upvalue.is_local) 1 else 0);
+            try self.emitByte(@intCast(upvalue.idx));
+        }
     }
 
     fn and_(self: *Compiler, _: ParseContext) !void {
@@ -695,10 +784,13 @@ pub const Compiler = struct {
     }
 
     fn namedVariable(self: *Compiler, name: Token, ctx: ParseContext) !void {
-        var arg_idx = self.resolveLocal(name);
+        var arg_idx = self.func_context.resolveLocal(name);
 
         const result: OpPair = if (arg_idx != null) blk: {
             break :blk .{ .get = .get_local, .set = .set_local };
+        } else if (try self.func_context.resolveUpvalue(name)) |upval_idx| blk: {
+            arg_idx = upval_idx;
+            break :blk .{ .get = .get_upvalue, .set = .set_upvalue };
         } else blk: {
             arg_idx = try self.identifierConstant(name);
             break :blk .{ .get = .get_global, .set = .set_global };
@@ -710,28 +802,6 @@ pub const Compiler = struct {
         } else {
             try self.emitCodeAndOperand(result.get, @intCast(arg_idx.?));
         }
-    }
-
-    fn resolveLocal(self: *Compiler, name: Token) ?usize {
-        var i: usize = self.func_context.locals_info.locals.items.len;
-        while (i > 0) {
-            i -= 1;
-            const local = self.func_context.locals_info.locals.items[i];
-
-            // Return the local's index if the requested name matches.
-            // We need to compare the strings by value since these are pointers into
-            // the original source string, rather than interned strings that we can
-            // compare by pointer.
-            if (std.mem.eql(u8, name.text_ref, local.name.text_ref)) {
-                if (local.depth == null) {
-                    self.markError("Cannot ready local variable in its own initialzer.");
-                    // Should we return here?
-                }
-
-                return i;
-            }
-        }
-        return null;
     }
 
     fn unary(self: *Compiler, _: ParseContext) !void {

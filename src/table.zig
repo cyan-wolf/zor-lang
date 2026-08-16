@@ -1,7 +1,7 @@
 const std = @import("std");
 const value_mod = @import("value.zig");
 const Value = value_mod.Value;
-const ObjString = value_mod.ObjString;
+const ObjString = @import("obj.zig").ObjString;
 
 pub fn hashString(string: []const u8) u64 {
     return std.hash.Wyhash.hash(0, string);

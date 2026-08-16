@@ -26,14 +26,18 @@ pub const OpCode = enum(u8) {
     set_global,
     get_local,
     set_local,
+    get_upvalue,
+    set_upvalue,
+    close_upvalue,
     jump_if_false,
     jump,
     loop,
     call,
+    closure,
 
     pub fn size(self: OpCode) usize {
         return switch (self) {
-            .constant, .define_global, .get_global, .set_global, .get_local, .set_local, .call => 2,
+            .constant, .define_global, .get_global, .set_global, .get_local, .set_local, .get_upvalue, .set_upvalue, .call, .closure => 2,
             .jump_if_false, .jump, .loop => 3,
             else => 1,
         };
@@ -105,6 +109,27 @@ pub const Chunk = struct {
         // an op code.
         const instruction: OpCode = @enumFromInt(self.code.items[offset]);
 
+        if (instruction == .closure) { // variable length encoding so this is a special case
+            var func_offset = offset + 1;
+
+            std.debug.print("op_{s} {d:4} '", .{ @tagName(instruction), func_offset });
+
+            const constIdx: usize = @intCast(self.code.items[func_offset]);
+            const function = self.constants.items[constIdx].asFunction();
+
+            for (0..function.upvalue_count) |i| {
+                _ = i;
+
+                func_offset += 1;
+                const local_msg = if (self.code.items[func_offset] == 1) "local" else "upvalue";
+
+                func_offset += 1;
+                const idx = self.code.items[func_offset];
+
+                std.debug.print("{d:4}    | {s} {d}", .{ offset, local_msg, idx });
+            }
+            return func_offset + 1;
+        }
         if (instruction.size() == 2) {
             const constIdx: usize = @intCast(self.code.items[offset + 1]);
             std.debug.print("op_{s} {d:4} '", .{ @tagName(instruction), constIdx });
