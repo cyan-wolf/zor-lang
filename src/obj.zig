@@ -274,6 +274,8 @@ pub const ObjClosure = struct {
 pub const ObjUpvalue = struct {
     obj: Obj,
     location: *Value,
+    next: ?*ObjUpvalue,
+    closed_over_value: ?Value,
 
     /// NOTE: Do not call this method directly, use `AllocMonitor.createUpvalue` instead.
     pub fn initUntracked(allocator: std.mem.Allocator, location: *Value) !*ObjUpvalue {
@@ -284,6 +286,8 @@ pub const ObjUpvalue = struct {
                 .next = null,
             },
             .location = location,
+            .next = null,
+            .closed_over_value = null,
         };
 
         return ptr;

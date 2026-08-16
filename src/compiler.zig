@@ -109,6 +109,7 @@ pub const FunctionCompiler = struct {
     pub fn resolveUpvalue(self: *FunctionCompiler, name: Token) !?usize {
         if (self.enclosing) |enclosing| {
             if (enclosing.resolveLocal(name)) |local_idx| {
+                enclosing.locals_info.locals.items[local_idx].is_captured = true;
                 return try self.addUpvalue(local_idx, true);
             }
 
@@ -557,6 +558,7 @@ pub const Compiler = struct {
             .name = name,
             // null represents uninitialized
             .depth = null,
+            .is_captured = false,
         });
     }
 
@@ -669,7 +671,14 @@ pub const Compiler = struct {
             const next_local = self.func_context.locals_info.locals.getLast();
 
             if (next_local.depth != null and next_local.depth.? > self.func_context.locals_info.scope_depth) {
-                try self.emitCode(.pop);
+                const latest_var_idx = self.func_context.locals_info.locals.items.len - 1;
+                const latest_var_was_captured = self.func_context.locals_info.locals.items[latest_var_idx].is_captured;
+
+                if (latest_var_was_captured) {
+                    try self.emitCode(.close_upvalue);
+                } else {
+                    try self.emitCode(.pop);
+                }
                 _ = self.func_context.locals_info.locals.pop();
             } else {
                 break;

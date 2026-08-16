@@ -8,4 +8,4 @@ fun outer() {
   inner();
 }
 
-outer(); // should print "outer"; currently incorrectly prints "global"
+outer(); // should print "outer"; should not print "global"

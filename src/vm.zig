@@ -41,6 +41,7 @@ pub const InterpretError = error{
 
 pub const AllocMonitor = struct {
     objects: ?*Obj,
+    open_upvalues: ?*ObjUpvalue,
     interned_strings: StringPool,
     globals: Table,
     table_context: TableContext,
@@ -50,6 +51,7 @@ pub const AllocMonitor = struct {
     pub fn init(allocator: std.mem.Allocator) AllocMonitor {
         return .{
             .objects = null,
+            .open_upvalues = null,
             .interned_strings = StringPool.init(allocator),
             .globals = Table.init(allocator),
             .table_context = .{},
@@ -224,8 +226,45 @@ pub const VM = struct {
     }
 
     fn captureUpvalue(self: *VM, local_ptr: *Value) !*ObjUpvalue {
-        const upval = try self.alloc_monitor.createUpvalue(local_ptr);
-        return upval;
+        var prev_upval: ?*ObjUpvalue = null;
+        var upval = self.alloc_monitor.open_upvalues;
+
+        while (upval != null and @intFromPtr(upval.?.location) > @intFromPtr(local_ptr)) {
+            prev_upval = upval;
+            upval = upval.?.next;
+        }
+
+        if (upval != null and upval.?.location == local_ptr) {
+            return upval.?;
+        } else {
+            const new_upval = try self.alloc_monitor.createUpvalue(local_ptr);
+            new_upval.next = upval;
+
+            if (prev_upval) |prev| {
+                prev.next = new_upval;
+            } else {
+                self.alloc_monitor.open_upvalues = new_upval;
+            }
+            return new_upval;
+        }
+    }
+
+    fn closeUpvalues(self: *VM, last_location_ptr: *Value) void {
+        while (self.alloc_monitor.open_upvalues) |open_upvals| {
+            if (@intFromPtr(open_upvals.location) < @intFromPtr(last_location_ptr)) {
+                break;
+            }
+            const head_upval = open_upvals;
+            // Copy the location pointer to the heap.
+            head_upval.closed_over_value = head_upval.location.*;
+
+            // Self-referential pointer to the object's own field (O_O).
+            head_upval.location = &head_upval.closed_over_value.?;
+
+            // `head_upval` is no longer closed so we remove it from the list
+            // of open up-values.
+            self.alloc_monitor.open_upvalues = head_upval.next;
+        }
     }
 
     fn readByte(self: *VM) CodeContent {
@@ -308,6 +347,7 @@ pub const VM = struct {
             switch (instruction) {
                 .opreturn => {
                     const result = self.pop();
+                    self.closeUpvalues(&self.stack.items[self.curr_frame.stack_start_idx]);
 
                     const dead_frame = self.frames.pop();
                     self.stack.items.len = dead_frame.?.stack_start_idx;
@@ -451,6 +491,10 @@ pub const VM = struct {
 
                     // LIFETIMES...
                     self.curr_frame.closure.upvalues.items[slot].?.location.* = self.peek(0);
+                },
+                .close_upvalue => {
+                    self.closeUpvalues(&self.stack.items[self.stack.items.len - 1]);
+                    _ = self.pop();
                 },
             }
         }
