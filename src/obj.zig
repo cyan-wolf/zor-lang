@@ -139,6 +139,33 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    pub fn get_byte_size(self: *const Obj) usize {
+        switch (self.kind) {
+            .string => {
+                const string = self.as_obj_string_const();
+                return @sizeOf(ObjString) + string.data.len;
+            },
+            .function => {
+                const function = self.as_obj_function_const();
+
+                const chunk = function.chunk;
+                const chunk_size = chunk.code.capacity + chunk.lines.capacity * @sizeOf(usize) + chunk.constants.capacity * @sizeOf(Value);
+
+                return @sizeOf(ObjFunction) + chunk_size;
+            },
+            .closure => {
+                const closure = self.as_obj_closure_const();
+                return @sizeOf(ObjClosure) + closure.upvalues.capacity * @sizeOf(?*ObjUpvalue);
+            },
+            .upvalue => {
+                return @sizeOf(ObjUpvalue);
+            },
+            .native_function => {
+                return @sizeOf(ObjNativeFunction);
+            },
+        }
+    }
+
     pub fn deinit(self: *Obj, allocator: std.mem.Allocator) void {
         switch (self.kind) {
             .string => {

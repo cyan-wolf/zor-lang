@@ -32,6 +32,8 @@ pub const ZorConfig = struct {
     trace_parser_advance: bool,
     dissasemble_chunk_at_end: bool = false,
     max_stack_frames: usize = 100,
+    debug_stress_gc: bool,
+    debug_log_gc: bool,
 };
 
 pub const InterpretError = error{
@@ -48,7 +50,9 @@ pub const AllocMonitor = struct {
     string_pool_context: StringPoolContext,
     allocator: Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) AllocMonitor {
+    config: ZorConfig,
+
+    pub fn init(allocator: std.mem.Allocator, config: ZorConfig) AllocMonitor {
         return .{
             .objects = null,
             .open_upvalues = null,
@@ -57,6 +61,8 @@ pub const AllocMonitor = struct {
             .table_context = .{},
             .string_pool_context = .{},
             .allocator = allocator,
+
+            .config = config,
         };
     }
 
@@ -99,7 +105,26 @@ pub const AllocMonitor = struct {
         return native;
     }
 
+    pub fn collectGarbage(self: *AllocMonitor) !void {
+        if (self.config.debug_log_gc) {
+            std.debug.print("== GC Begin ==\n", .{});
+        }
+
+        // TODO
+
+        if (self.config.debug_log_gc) {
+            std.debug.print("== GC End ==\n", .{});
+        }
+    }
+
     fn registerAllocatedObj(self: *AllocMonitor, obj: *Obj) !void {
+        if (self.config.debug_stress_gc) {
+            if (self.config.debug_log_gc) {
+                std.debug.print("Allocated object {*}. Size {d}. Kind: {s}\n", .{ obj, obj.get_byte_size(), @tagName(obj.kind) });
+            }
+            try self.collectGarbage();
+        }
+
         obj.next = self.objects;
         self.objects = obj;
     }
@@ -109,6 +134,12 @@ pub const AllocMonitor = struct {
 
         while (curr) |node| {
             curr = node.next;
+
+            if (self.config.debug_log_gc) {
+                // printf("%p free type %d\n", (void*)object, object->type)
+                std.debug.print("Object {*} was freed. Kind: {s}", .{ node, @tagName(node.kind) });
+            }
+
             node.deinit(self.allocator);
         }
 
@@ -136,7 +167,7 @@ pub const VM = struct {
 
             .frames = .empty,
             .stack = .empty,
-            .alloc_monitor = AllocMonitor.init(allocator),
+            .alloc_monitor = AllocMonitor.init(allocator, config),
 
             .allocator = allocator,
             .cli = cli,

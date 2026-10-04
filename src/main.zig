@@ -32,6 +32,8 @@ pub fn main() !void {
     const config: ZorConfig = .{
         .trace_execution = false,
         .trace_parser_advance = false,
+        .debug_stress_gc = true,
+        .debug_log_gc = true,
     };
 
     var vm = try VM.init(
