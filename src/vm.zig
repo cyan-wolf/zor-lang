@@ -50,6 +50,8 @@ pub const AllocMonitor = struct {
     string_pool_context: StringPoolContext,
     allocator: Allocator,
 
+    stack: std.ArrayList(Value),
+
     config: ZorConfig,
 
     pub fn init(allocator: std.mem.Allocator, config: ZorConfig) AllocMonitor {
@@ -61,6 +63,8 @@ pub const AllocMonitor = struct {
             .table_context = .{},
             .string_pool_context = .{},
             .allocator = allocator,
+
+            .stack = .empty,
 
             .config = config,
         };
@@ -110,10 +114,30 @@ pub const AllocMonitor = struct {
             std.debug.print("== GC Begin ==\n", .{});
         }
 
-        // TODO
+        try self.markRoots();
 
         if (self.config.debug_log_gc) {
             std.debug.print("== GC End ==\n", .{});
+        }
+    }
+
+    fn markRoots(self: *AllocMonitor) !void {
+        // Mark the items on the stack.
+        for (self.stack.items) |slot| {
+            try slot.gcMark();
+        }
+
+        // Mark globals.
+        var iter1 = self.globals.iterator();
+        while (iter1.next()) |entry| {
+            try entry.key_ptr.*.as_obj().gcMark();
+            try entry.value_ptr.gcMark();
+        }
+
+        // Mark the interned string pool.
+        var iter2 = self.interned_strings.iterator();
+        while (iter2.next()) |entry| {
+            try entry.key_ptr.*.as_obj().gcMark();
         }
     }
 
@@ -154,7 +178,6 @@ pub const VM = struct {
     frames: std.ArrayList(CallFrame),
     curr_frame: *CallFrame = undefined,
 
-    stack: std.ArrayList(Value),
     alloc_monitor: AllocMonitor,
 
     allocator: Allocator,
@@ -166,7 +189,6 @@ pub const VM = struct {
             .config = config,
 
             .frames = .empty,
-            .stack = .empty,
             .alloc_monitor = AllocMonitor.init(allocator, config),
 
             .allocator = allocator,
@@ -176,7 +198,7 @@ pub const VM = struct {
 
         // 256 * 256 = 65536
         const stack_capacity = try std.math.powi(usize, std.math.maxInt(u8), 2);
-        try self.stack.ensureTotalCapacity(allocator, stack_capacity);
+        try self.alloc_monitor.stack.ensureTotalCapacity(allocator, stack_capacity);
 
         try self.defineNative("clock", native_functions.nativeFunctionClock, 0);
         try self.defineNative("type", native_functions.nativeFunctionGetType, 1);
@@ -208,15 +230,15 @@ pub const VM = struct {
     }
 
     fn peek(self: *const VM, distance: usize) Value {
-        return self.stack.items[self.stack.items.len - 1 - distance];
+        return self.alloc_monitor.stack.items[self.alloc_monitor.stack.items.len - 1 - distance];
     }
 
     fn push(self: *VM, value: Value) !void {
-        try self.stack.append(self.allocator, value);
+        try self.alloc_monitor.stack.append(self.allocator, value);
     }
 
     fn pop(self: *VM) Value {
-        return self.stack.pop() orelse unreachable;
+        return self.alloc_monitor.stack.pop() orelse unreachable;
     }
 
     fn callValue(self: *VM, callee: Value, arg_count: usize) !void {
@@ -229,11 +251,11 @@ pub const VM = struct {
             if (native_function.arity != arg_count) {
                 try self.reportRuntimeError("Wrong number of arguments.");
             }
-            const args = self.stack.items[self.stack.items.len - arg_count ..];
+            const args = self.alloc_monitor.stack.items[self.alloc_monitor.stack.items.len - arg_count ..];
             const res = try native_function.function(arg_count, args, &self.alloc_monitor);
 
             // Clean up: pop the arguments AND the native function object off the stack
-            self.stack.items.len -= (arg_count + 1);
+            self.alloc_monitor.stack.items.len -= (arg_count + 1);
 
             try self.push(res);
         } else {
@@ -255,7 +277,7 @@ pub const VM = struct {
         const frame: CallFrame = .{
             .closure = closure,
             .ip = 0,
-            .stack_start_idx = self.stack.items.len - arg_count - 1,
+            .stack_start_idx = self.alloc_monitor.stack.items.len - arg_count - 1,
         };
         try self.frames.append(self.allocator, frame);
     }
@@ -364,7 +386,7 @@ pub const VM = struct {
             if (self.config.trace_execution) {
                 // Print the stack.
                 std.debug.print("        ", .{});
-                for (self.stack.items) |slot| {
+                for (self.alloc_monitor.stack.items) |slot| {
                     std.debug.print("[ ", .{});
                     slot.show();
                     std.debug.print(" ]", .{});
@@ -381,12 +403,12 @@ pub const VM = struct {
 
             switch (instruction) {
                 .opreturn => {
-                    const slot_ptr = &self.stack.items.ptr[self.curr_frame.stack_start_idx];
+                    const slot_ptr = &self.alloc_monitor.stack.items.ptr[self.curr_frame.stack_start_idx];
                     const result = self.pop();
                     self.closeUpvalues(slot_ptr);
 
                     const dead_frame = self.frames.pop();
-                    self.stack.items.len = dead_frame.?.stack_start_idx;
+                    self.alloc_monitor.stack.items.len = dead_frame.?.stack_start_idx;
 
                     if (self.frames.items.len == 0) {
                         return;
@@ -469,11 +491,11 @@ pub const VM = struct {
                 },
                 .get_local => {
                     const slot = self.readByte();
-                    try self.push(self.stack.items[self.curr_frame.stack_start_idx + slot]);
+                    try self.push(self.alloc_monitor.stack.items[self.curr_frame.stack_start_idx + slot]);
                 },
                 .set_local => {
                     const slot = self.readByte();
-                    self.stack.items[self.curr_frame.stack_start_idx + slot] = self.peek(0);
+                    self.alloc_monitor.stack.items[self.curr_frame.stack_start_idx + slot] = self.peek(0);
                 },
                 .jump_if_false => {
                     const offset = self.readU16();
@@ -510,7 +532,7 @@ pub const VM = struct {
                         if (is_local) {
                             const local_idx = self.curr_frame.stack_start_idx + upval_idx;
                             // LIFETIMES...
-                            const local_ptr: *Value = &self.stack.items[local_idx];
+                            const local_ptr: *Value = &self.alloc_monitor.stack.items[local_idx];
                             closure.upvalues.items[i] = try self.captureUpvalue(local_ptr);
                         } else {
                             closure.upvalues.items[i] = self.curr_frame.closure.upvalues.items[upval_idx];
@@ -529,7 +551,7 @@ pub const VM = struct {
                     self.curr_frame.closure.upvalues.items[slot].?.location.* = self.peek(0);
                 },
                 .close_upvalue => {
-                    self.closeUpvalues(&self.stack.items[self.stack.items.len - 1]);
+                    self.closeUpvalues(&self.alloc_monitor.stack.items[self.alloc_monitor.stack.items.len - 1]);
                     _ = self.pop();
                 },
             }
@@ -582,7 +604,7 @@ pub const VM = struct {
         }
 
         // Reset the stack.
-        self.stack.clearAndFree(self.allocator);
+        self.alloc_monitor.stack.clearAndFree(self.allocator);
 
         return error.RuntimeError;
     }
@@ -607,7 +629,7 @@ pub const VM = struct {
         self.alloc_monitor.deinit();
 
         // self.chunk = null;
-        self.stack.deinit(self.allocator);
+        self.alloc_monitor.stack.deinit(self.allocator);
 
         self.compiler.?.deinit();
 

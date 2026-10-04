@@ -15,6 +15,7 @@ pub const ObjKind = enum {
 pub const Obj = struct {
     kind: ObjKind,
     next: ?*Obj,
+    is_marked: bool = false,
 
     pub fn is_equal(self: *const Obj, other: *const Obj) bool {
         switch (self.kind) {
@@ -97,6 +98,10 @@ pub const Obj = struct {
             },
             else => self.show(),
         }
+    }
+
+    pub fn gcMark(self: *Obj) !void {
+        self.is_marked = true;
     }
 
     pub fn as_obj_string_mut(self: *Obj) *ObjString {

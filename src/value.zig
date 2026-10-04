@@ -154,6 +154,13 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn gcMark(self: Value) !void {
+        switch (self) {
+            .obj => |o| try o.gcMark(),
+            else => {},
+        }
+    }
+
     pub fn show(self: Value) void {
         switch (self) {
             .boolean => |b| std.debug.print("{}", .{b}),
