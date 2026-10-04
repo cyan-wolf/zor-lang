@@ -51,6 +51,7 @@ pub const AllocMonitor = struct {
     allocator: Allocator,
 
     stack: std.ArrayList(Value),
+    frames: std.ArrayList(CallFrame),
 
     config: ZorConfig,
 
@@ -65,6 +66,7 @@ pub const AllocMonitor = struct {
             .allocator = allocator,
 
             .stack = .empty,
+            .frames = .empty,
 
             .config = config,
         };
@@ -127,6 +129,11 @@ pub const AllocMonitor = struct {
             try slot.gcMark();
         }
 
+        // Mark closures (they may heap allocate captures).
+        for (self.frames.items) |frame| {
+            try frame.closure.as_obj().gcMark();
+        }
+
         // Mark globals.
         var iter1 = self.globals.iterator();
         while (iter1.next()) |entry| {
@@ -175,10 +182,9 @@ pub const AllocMonitor = struct {
 pub const VM = struct {
     config: ZorConfig,
 
-    frames: std.ArrayList(CallFrame),
-    curr_frame: *CallFrame = undefined,
-
     alloc_monitor: AllocMonitor,
+
+    curr_frame: *CallFrame = undefined,
 
     allocator: Allocator,
     cli: Cli,
@@ -188,7 +194,6 @@ pub const VM = struct {
         var self = VM{
             .config = config,
 
-            .frames = .empty,
             .alloc_monitor = AllocMonitor.init(allocator, config),
 
             .allocator = allocator,
@@ -270,7 +275,7 @@ pub const VM = struct {
             try self.reportRuntimeError("Wrong number of arguments.");
         }
 
-        if (self.frames.items.len == self.config.max_stack_frames) {
+        if (self.alloc_monitor.frames.items.len == self.config.max_stack_frames) {
             try self.reportRuntimeError("Stack overflow.");
         }
 
@@ -279,7 +284,7 @@ pub const VM = struct {
             .ip = 0,
             .stack_start_idx = self.alloc_monitor.stack.items.len - arg_count - 1,
         };
-        try self.frames.append(self.allocator, frame);
+        try self.alloc_monitor.frames.append(self.allocator, frame);
     }
 
     fn captureUpvalue(self: *VM, local_ptr: *Value) !*ObjUpvalue {
@@ -381,7 +386,7 @@ pub const VM = struct {
     fn run(self: *VM) !void {
         while (true) {
             // NOTE: self-referential struct
-            self.curr_frame = &self.frames.items[self.frames.items.len - 1];
+            self.curr_frame = &self.alloc_monitor.frames.items[self.alloc_monitor.frames.items.len - 1];
 
             if (self.config.trace_execution) {
                 // Print the stack.
@@ -407,17 +412,17 @@ pub const VM = struct {
                     const result = self.pop();
                     self.closeUpvalues(slot_ptr);
 
-                    const dead_frame = self.frames.pop();
+                    const dead_frame = self.alloc_monitor.frames.pop();
                     self.alloc_monitor.stack.items.len = dead_frame.?.stack_start_idx;
 
-                    if (self.frames.items.len == 0) {
+                    if (self.alloc_monitor.frames.items.len == 0) {
                         return;
                     }
 
                     try self.push(result);
 
                     // NOTE: self-referential type
-                    self.curr_frame = &self.frames.items[self.frames.items.len - 1];
+                    self.curr_frame = &self.alloc_monitor.frames.items[self.alloc_monitor.frames.items.len - 1];
                 },
                 .print => {
                     // Use the pretty-print representation.
@@ -516,9 +521,9 @@ pub const VM = struct {
                     try self.callValue(self.peek(arg_count), arg_count);
 
                     // Since a function was just called, the current frame should point to the top of the
-                    // `self.frames` stack.
+                    // `self.alloc_monitor.frames` stack.
                     // NOTE: self referential struct (!!!) - use indices for curr_frame if lifetimes get bad.
-                    self.curr_frame = &self.frames.items[self.frames.items.len - 1];
+                    self.curr_frame = &self.alloc_monitor.frames.items[self.alloc_monitor.frames.items.len - 1];
                 },
                 .closure => {
                     const func = self.readConstant().asFunction();
@@ -596,8 +601,8 @@ pub const VM = struct {
 
         // Stack trace.
         std.debug.print("Stack Trace:\n", .{});
-        for (0..self.frames.items.len) |i| {
-            const frame = &self.frames.items[self.frames.items.len - i - 1];
+        for (0..self.alloc_monitor.frames.items.len) |i| {
+            const frame = &self.alloc_monitor.frames.items[self.alloc_monitor.frames.items.len - i - 1];
             const function = frame.closure.function;
 
             std.debug.print("| {s}(...)\n", .{function.get_name()});
@@ -633,6 +638,6 @@ pub const VM = struct {
 
         self.compiler.?.deinit();
 
-        self.frames.deinit(self.allocator);
+        self.alloc_monitor.frames.deinit(self.allocator);
     }
 };
