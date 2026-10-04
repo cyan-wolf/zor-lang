@@ -134,6 +134,13 @@ pub const AllocMonitor = struct {
             try frame.closure.as_obj().gcMark();
         }
 
+        // Mark the open upvalues.
+        var curr: ?*ObjUpvalue = self.open_upvalues;
+        while (curr) |node| {
+            try node.as_obj().gcMark();
+            curr = node.next;
+        }
+
         // Mark globals.
         var iter1 = self.globals.iterator();
         while (iter1.next()) |entry| {
